@@ -1,0 +1,282 @@
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { useTranslations } from "next-intl";
+import { uploadUrl } from "@/lib/utils/upload-url";
+import { useModelStore } from "@/stores/model-store";
+import { InlineModelPicker } from "@/components/editor/model-selector";
+import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
+import {
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  ImageIcon,
+  VideoIcon,
+  MessageCircle,
+  Clock,
+  Sparkles,
+} from "lucide-react";
+
+interface Dialogue {
+  id: string;
+  text: string;
+  characterName: string;
+}
+
+interface ShotCardProps {
+  id: string;
+  projectId: string;
+  sequence: number;
+  prompt: string;
+  duration: number;
+  firstFrame: string | null;
+  lastFrame: string | null;
+  videoUrl: string | null;
+  status: string;
+  dialogues: Dialogue[];
+  onUpdate: () => void;
+}
+
+const statusVariant: Record<string, "outline" | "success" | "warning" | "destructive"> = {
+  pending: "outline",
+  generating: "warning",
+  completed: "success",
+  failed: "destructive",
+};
+
+export function ShotCard({
+  id,
+  projectId,
+  sequence,
+  prompt,
+  duration,
+  firstFrame,
+  lastFrame,
+  videoUrl,
+  status,
+  dialogues,
+  onUpdate,
+}: ShotCardProps) {
+  const t = useTranslations();
+  const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const [editPrompt, setEditPrompt] = useState(prompt);
+  const [generatingFrames, setGeneratingFrames] = useState(false);
+  const [generatingVideo, setGeneratingVideo] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [videoRatio, setVideoRatio] = useState("16:9");
+  const variant = statusVariant[status] || "outline";
+
+  async function handleSave() {
+    await fetch(`/api/projects/${projectId}/shots/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: editPrompt }),
+    });
+  }
+
+  async function handleGenerateFrames() {
+    setGeneratingFrames(true);
+    try {
+      await fetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_frame_generate",
+          payload: { shotId: id },
+          modelConfig: getModelConfig(),
+        }),
+      });
+      onUpdate();
+    } catch (err) {
+      console.error("Frame generate error:", err);
+    }
+    setGeneratingFrames(false);
+  }
+
+  async function handleGenerateVideo() {
+    setGeneratingVideo(true);
+    try {
+      await fetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_video_generate",
+          payload: { shotId: id, ratio: videoRatio },
+          modelConfig: getModelConfig(),
+        }),
+      });
+      onUpdate();
+    } catch (err) {
+      console.error("Video generate error:", err);
+    }
+    setGeneratingVideo(false);
+  }
+
+  return (
+    <div className="group overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-all duration-300 hover:border-[--border-hover]">
+      {/* Header strip */}
+      <div className="flex items-center gap-4 p-4">
+        {/* Sequence badge */}
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/8 font-mono text-sm font-bold text-primary">
+          {sequence}
+        </div>
+
+        {/* Media thumbnails */}
+        <div className="flex gap-1.5">
+          {[
+            { src: firstFrame, icon: ImageIcon, label: t("shot.firstFrame"), type: "image" as const },
+            { src: lastFrame, icon: ImageIcon, label: t("shot.lastFrame"), type: "image" as const },
+            { src: videoUrl, icon: VideoIcon, label: "Video", type: "video" as const },
+          ].map((item, i) => (
+            <div
+              key={i}
+              className={`h-14 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-[--border-subtle] ${item.src ? "cursor-pointer transition-opacity hover:opacity-80" : ""}`}
+              onClick={() => item.src && setPreviewSrc(uploadUrl(item.src))}
+            >
+              {item.src ? (
+                item.type === "video" ? (
+                  <video className="h-full w-full object-cover" src={uploadUrl(item.src)} />
+                ) : (
+                  <img src={uploadUrl(item.src)} alt={item.label} className="h-full w-full object-cover" />
+                )
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-[--surface]">
+                  <item.icon className="h-4 w-4 text-[--text-muted]" />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Info */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-[--text-primary]">{prompt}</p>
+          <div className="mt-1.5 flex items-center gap-3">
+            <span className="flex items-center gap-1 text-xs text-[--text-muted]">
+              <Clock className="h-3 w-3" />
+              {duration}s
+            </span>
+            {dialogues.length > 0 && (
+              <span className="flex items-center gap-1 text-xs text-[--text-muted]">
+                <MessageCircle className="h-3 w-3" />
+                {dialogues.length}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Status + expand */}
+        <div className="flex items-center gap-2">
+          <Badge variant={variant} className={status === "generating" ? "animate-status-pulse" : ""}>
+            {status}
+          </Badge>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-all hover:bg-[--surface] hover:text-[--text-primary]"
+          >
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Image/Video preview lightbox */}
+      {previewSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setPreviewSrc(null)}
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+            {previewSrc.match(/\.(mp4|webm|mov)/) ? (
+              <video
+                src={previewSrc}
+                controls
+                autoPlay
+                className="max-h-[85vh] rounded-xl"
+              />
+            ) : (
+              <img
+                src={previewSrc}
+                alt="Preview"
+                className="max-h-[85vh] rounded-xl"
+              />
+            )}
+            <button
+              onClick={() => setPreviewSrc(null)}
+              className="absolute -right-3 -top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-sm font-bold text-[--text-primary] shadow-lg transition-transform hover:scale-110"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="space-y-4 border-t border-[--border-subtle] p-4">
+          <Textarea
+            value={editPrompt}
+            onChange={(e) => setEditPrompt(e.target.value)}
+            onBlur={handleSave}
+            rows={3}
+            placeholder={t("shot.prompt")}
+          />
+
+          {dialogues.length > 0 && (
+            <div className="space-y-2 rounded-xl bg-[--surface] p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                {t("shot.dialogue")}
+              </p>
+              {dialogues.map((d) => (
+                <p key={d.id} className="text-sm leading-relaxed">
+                  <span className="font-semibold text-primary">{d.characterName}</span>
+                  <span className="mx-1.5 text-[--text-muted]">&mdash;</span>
+                  <span className="text-[--text-secondary]">{d.text}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <InlineModelPicker capability="image" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleGenerateFrames}
+              disabled={generatingFrames || generatingVideo}
+            >
+              {generatingFrames ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="h-3.5 w-3.5" />
+              )}
+              {generatingFrames ? t("common.generating") : t("project.generateFrames")}
+            </Button>
+
+            {firstFrame && lastFrame && (
+              <>
+                <InlineModelPicker capability="video" />
+                <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
+                <Button
+                  size="sm"
+                  onClick={handleGenerateVideo}
+                  disabled={generatingFrames || generatingVideo}
+                >
+                  {generatingVideo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {generatingVideo ? t("common.generating") : t("project.generateVideo")}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
