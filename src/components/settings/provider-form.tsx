@@ -13,17 +13,27 @@ import {
 import { useTranslations } from "next-intl";
 import { Loader2, Download, Plus, Eye, EyeOff, Trash2, Search } from "lucide-react";
 
-const PROTOCOL_OPTIONS: { value: Protocol; label: string }[] = [
-  { value: "openai", label: "OpenAI" },
-  { value: "gemini", label: "Gemini" },
-  { value: "seedance", label: "Seedance" },
-];
-
-const CAPABILITY_OPTIONS: { value: Capability; label: string }[] = [
-  { value: "text", label: "Text" },
-  { value: "image", label: "Image" },
-  { value: "video", label: "Video" },
-];
+function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {
+  if (capability === "text") {
+    return [
+      { value: "openai", label: "OpenAI" },
+      { value: "gemini", label: "Gemini" },
+    ];
+  }
+  if (capability === "image") {
+    return [
+      { value: "openai", label: "OpenAI" },
+      { value: "gemini", label: "Gemini" },
+      { value: "kling", label: "Kling" },
+    ];
+  }
+  // video
+  return [
+    { value: "seedance", label: "Seedance" },
+    { value: "gemini", label: "Gemini (Veo)" },
+    { value: "kling", label: "Kling" },
+  ];
+}
 
 interface ProviderFormProps {
   provider: Provider;
@@ -77,14 +87,10 @@ export function ProviderForm({ provider }: ProviderFormProps) {
     setManualModelId("");
   }
 
-  function handleCapabilityToggle(cap: Capability) {
-    updateProvider(provider.id, { capability: cap });
-  }
-
   return (
     <div className="space-y-5">
-      {/* Row 1: Name + Protocol + Capabilities */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto_auto]">
+      {/* Row 1: Name + Protocol */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
         <div className="space-y-1.5">
           <Label className="text-xs">{t("providerName")}</Label>
           <Input
@@ -98,7 +104,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
         <div className="space-y-1.5">
           <Label className="text-xs">{t("protocol")}</Label>
           <div className="flex gap-1.5 pt-0.5">
-            {PROTOCOL_OPTIONS.map((opt) => (
+            {getProtocolOptions(provider.capability).map((opt) => (
               <button
                 key={opt.value}
                 onClick={() =>
@@ -106,24 +112,6 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                 }
                 className={`rounded-lg border px-2.5 py-[7px] text-xs transition-all ${
                   provider.protocol === opt.value
-                    ? "border-primary/30 bg-primary/8 text-primary font-medium"
-                    : "border-[--border-subtle] text-[--text-secondary] hover:border-[--border-hover]"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("capabilities")}</Label>
-          <div className="flex gap-1.5 pt-0.5">
-            {CAPABILITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => handleCapabilityToggle(opt.value)}
-                className={`rounded-lg border px-2.5 py-[7px] text-xs transition-all ${
-                  provider.capability === opt.value
                     ? "border-primary/30 bg-primary/8 text-primary font-medium"
                     : "border-[--border-subtle] text-[--text-secondary] hover:border-[--border-hover]"
                 }`}
@@ -185,7 +173,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
             size="sm"
             variant="outline"
             onClick={handleFetchModels}
-            disabled={fetching || !provider.apiKey}
+            disabled={fetching || (!provider.apiKey && provider.protocol !== "kling")}
           >
             {fetching ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
