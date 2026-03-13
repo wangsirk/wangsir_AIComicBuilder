@@ -6,7 +6,7 @@ import { ProjectNav } from "@/components/editor/project-nav";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useLocale } from "next-intl";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Settings } from "lucide-react";
 import { LogoIcon } from "@/components/logo";
 import { LanguageSwitcher } from "@/components/language-switcher";
 
@@ -58,7 +58,15 @@ export default function ProjectLayout({
             </h1>
           </div>
         </div>
-        <LanguageSwitcher />
+        <div className="flex items-center gap-1">
+          <Link
+            href={`/${locale}/settings`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-all hover:bg-[--surface] hover:text-[--text-primary]"
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
+          <LanguageSwitcher />
+        </div>
       </header>
 
       {/* Sidebar + content */}
