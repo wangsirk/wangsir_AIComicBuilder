@@ -88,10 +88,7 @@ export function DefaultModelPicker() {
       modelName: string;
     }[] = [];
     for (const p of providers) {
-      if (
-        !p.capabilities.includes(capability as "text" | "image" | "video")
-      )
-        continue;
+      if (p.capability !== capability) continue;
       for (const m of p.models) {
         if (!m.checked) continue;
         result.push({

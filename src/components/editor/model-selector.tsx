@@ -41,7 +41,7 @@ export function InlineModelPicker({ capability }: InlineModelPickerProps) {
 
   const options: { providerId: string; providerName: string; modelId: string; modelName: string }[] = [];
   for (const p of providers) {
-    if (!p.capabilities.includes(capability)) continue;
+    if (p.capability !== capability) continue;
     for (const m of p.models) {
       if (!m.checked) continue;
       options.push({

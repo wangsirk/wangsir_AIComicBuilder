@@ -78,10 +78,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
   }
 
   function handleCapabilityToggle(cap: Capability) {
-    const caps = provider.capabilities.includes(cap)
-      ? provider.capabilities.filter((c) => c !== cap)
-      : [...provider.capabilities, cap];
-    updateProvider(provider.id, { capabilities: caps });
+    updateProvider(provider.id, { capability: cap });
   }
 
   return (
@@ -126,7 +123,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                 key={opt.value}
                 onClick={() => handleCapabilityToggle(opt.value)}
                 className={`rounded-lg border px-2.5 py-[7px] text-xs transition-all ${
-                  provider.capabilities.includes(opt.value)
+                  provider.capability === opt.value
                     ? "border-primary/30 bg-primary/8 text-primary font-medium"
                     : "border-[--border-subtle] text-[--text-secondary] hover:border-[--border-hover]"
                 }`}

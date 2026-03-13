@@ -26,7 +26,7 @@ export default function SettingsPage() {
     const id = addProvider({
       name: "New Provider",
       protocol: "openai",
-      capabilities: ["text", "image"],
+      capability: "text",
       baseUrl: "https://api.openai.com",
       apiKey: "",
     });
