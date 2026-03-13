@@ -13,6 +13,13 @@ import {
 import { useTranslations } from "next-intl";
 import { Loader2, Download, Plus, Eye, EyeOff, Trash2, Search } from "lucide-react";
 
+const DEFAULT_BASE_URLS: Record<Protocol, string> = {
+  openai: "https://api.openai.com",
+  gemini: "https://generativelanguage.googleapis.com",
+  seedance: "https://ark.cn-beijing.volces.com",
+  kling: "https://api.klingai.com",
+};
+
 function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {
   if (capability === "text") {
     return [
@@ -108,7 +115,10 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               <button
                 key={opt.value}
                 onClick={() =>
-                  updateProvider(provider.id, { protocol: opt.value })
+                  updateProvider(provider.id, {
+                    protocol: opt.value,
+                    baseUrl: DEFAULT_BASE_URLS[opt.value],
+                  })
                 }
                 className={`rounded-lg border px-2.5 py-[7px] text-xs transition-all ${
                   provider.protocol === opt.value
