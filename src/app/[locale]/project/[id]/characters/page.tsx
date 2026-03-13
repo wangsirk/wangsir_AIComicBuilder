@@ -156,6 +156,7 @@ export default function CharactersPage() {
               description={char.description}
               referenceImage={char.referenceImage}
               onUpdate={() => fetchProject(project.id)}
+              batchGenerating={generatingImages}
             />
           ))}
         </div>
