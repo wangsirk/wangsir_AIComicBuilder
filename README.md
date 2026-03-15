@@ -4,6 +4,8 @@
 
 ![飞书群](images/lark-chat.png)
 
+本网站全程由 AI 驱动开发， 开发指南：https://github.com/twwch/vibe-coding
+
 AI 驱动的漫剧生成器 — 从剧本到动画视频的全自动流水线。
 
 ## 功能特性
