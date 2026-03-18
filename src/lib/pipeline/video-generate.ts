@@ -1,10 +1,21 @@
+import path from "path";
 import { db } from "@/lib/db";
-import { shots } from "@/lib/db/schema";
+import { shots, characters, storyboardVersions } from "@/lib/db/schema";
 import { resolveVideoProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { eq } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
+
+async function getVersionedUploadDirFromPipeline(versionId: string | null | undefined): Promise<string> {
+  if (!versionId) return process.env.UPLOAD_DIR || "./uploads";
+  const [version] = await db
+    .select({ label: storyboardVersions.label, projectId: storyboardVersions.projectId })
+    .from(storyboardVersions)
+    .where(eq(storyboardVersions.id, versionId));
+  if (!version) return process.env.UPLOAD_DIR || "./uploads";
+  return path.join(process.env.UPLOAD_DIR || "./uploads", "projects", version.projectId, version.label);
+}
 
 export async function handleVideoGenerate(task: Task) {
   const payload = task.payload as { shotId: string; ratio?: string; modelConfig?: ModelConfigPayload };
@@ -19,7 +30,16 @@ export async function handleVideoGenerate(task: Task) {
     throw new Error("Shot frames not generated yet");
   }
 
-  const videoProvider = resolveVideoProvider(payload.modelConfig);
+  const projectCharacters = await db
+    .select()
+    .from(characters)
+    .where(eq(characters.projectId, shot.projectId));
+  const characterDescriptions = projectCharacters
+    .map((c) => `${c.name}: ${c.description}`)
+    .join("\n");
+
+  const versionedUploadDir = await getVersionedUploadDirFromPipeline(shot.versionId);
+  const videoProvider = resolveVideoProvider(payload.modelConfig, versionedUploadDir);
 
   await db
     .update(shots)
@@ -29,6 +49,8 @@ export async function handleVideoGenerate(task: Task) {
   const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
   const prompt = buildVideoPrompt({
     videoScript,
+    motionScript: shot.motionScript ?? undefined,
+    characterDescriptions: characterDescriptions || undefined,
     cameraDirection: shot.cameraDirection || "static",
     startFrameDesc: shot.startFrameDesc ?? undefined,
     endFrameDesc: shot.endFrameDesc ?? undefined,

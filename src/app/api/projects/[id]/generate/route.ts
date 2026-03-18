@@ -641,15 +641,22 @@ async function handleBatchFrameGenerate(
     );
   }
 
+  const batchVersionId = payload?.versionId as string | undefined;
   const allShots = await db
     .select()
     .from(shots)
-    .where(eq(shots.projectId, projectId))
+    .where(batchVersionId
+      ? and(eq(shots.projectId, projectId), eq(shots.versionId, batchVersionId))
+      : eq(shots.projectId, projectId))
     .orderBy(asc(shots.sequence));
 
   if (allShots.length === 0) {
     return NextResponse.json({ results: [], message: "No shots found" });
   }
+
+  const versionedUploadDir = batchVersionId
+    ? await getVersionedUploadDir(batchVersionId)
+    : process.env.UPLOAD_DIR || "./uploads";
 
   const projectCharacters = await db
     .select()
@@ -660,7 +667,7 @@ async function handleBatchFrameGenerate(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const ai = resolveImageProvider(modelConfig);
+  const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const results: Array<{ shotId: string; sequence: number; status: string; firstFrame?: string; lastFrame?: string; error?: string }> = [];
 
   const overwrite = payload?.overwrite === true;
@@ -962,11 +969,18 @@ async function handleBatchVideoGenerate(
     return NextResponse.json({ error: "No video model configured" }, { status: 400 });
   }
 
+  const batchVersionId = payload?.versionId as string | undefined;
   const allShots = await db
     .select()
     .from(shots)
-    .where(eq(shots.projectId, projectId))
+    .where(batchVersionId
+      ? and(eq(shots.projectId, projectId), eq(shots.versionId, batchVersionId))
+      : eq(shots.projectId, projectId))
     .orderBy(asc(shots.sequence));
+
+  const versionedUploadDir = batchVersionId
+    ? await getVersionedUploadDir(batchVersionId)
+    : process.env.UPLOAD_DIR || "./uploads";
 
   const overwrite = payload?.overwrite === true;
   const eligible = allShots.filter((s) =>
@@ -984,7 +998,7 @@ async function handleBatchVideoGenerate(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const videoProvider = resolveVideoProvider(modelConfig);
+  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const ratio = (payload?.ratio as string) || "16:9";
 
   // Mark all as generating
@@ -1134,12 +1148,19 @@ async function handleBatchSceneFrame(
   }
 
   const overwrite = payload?.overwrite === true;
+  const batchVersionId = payload?.versionId as string | undefined;
 
   const allShots = await db
     .select()
     .from(shots)
-    .where(eq(shots.projectId, projectId))
+    .where(batchVersionId
+      ? and(eq(shots.projectId, projectId), eq(shots.versionId, batchVersionId))
+      : eq(shots.projectId, projectId))
     .orderBy(asc(shots.sequence));
+
+  const versionedUploadDir = batchVersionId
+    ? await getVersionedUploadDir(batchVersionId)
+    : process.env.UPLOAD_DIR || "./uploads";
 
   const eligible = allShots.filter(
     (s) => s.status !== "generating" && (overwrite || !s.sceneRefFrame)
@@ -1169,7 +1190,7 @@ async function handleBatchSceneFrame(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const imageProvider = resolveImageProvider(modelConfig);
+  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
 
   await Promise.all(
     eligible.map((shot) =>
@@ -1363,11 +1384,18 @@ async function handleBatchReferenceVideo(
     return NextResponse.json({ error: "No image model configured" }, { status: 400 });
   }
 
+  const batchVersionId = payload?.versionId as string | undefined;
   const allShots = await db
     .select()
     .from(shots)
-    .where(eq(shots.projectId, projectId))
+    .where(batchVersionId
+      ? and(eq(shots.projectId, projectId), eq(shots.versionId, batchVersionId))
+      : eq(shots.projectId, projectId))
     .orderBy(asc(shots.sequence));
+
+  const versionedUploadDir = batchVersionId
+    ? await getVersionedUploadDir(batchVersionId)
+    : process.env.UPLOAD_DIR || "./uploads";
 
   const overwrite = payload?.overwrite === true;
   const eligible = allShots.filter(
@@ -1401,8 +1429,8 @@ async function handleBatchReferenceVideo(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const imageProvider = resolveImageProvider(modelConfig);
-  const videoProvider = resolveVideoProvider(modelConfig);
+  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
+  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const ratio = (payload?.ratio as string) || "16:9";
 
   await Promise.all(
