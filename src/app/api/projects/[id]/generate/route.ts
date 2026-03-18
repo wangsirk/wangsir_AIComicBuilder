@@ -32,7 +32,7 @@ import {
 } from "@/lib/ai/prompts/frame-generate";
 import { buildSceneFramePrompt } from "@/lib/ai/prompts/scene-frame-generate";
 import { resolveImageProvider, resolveVideoProvider } from "@/lib/ai/provider-factory";
-import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
+import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 
@@ -1350,14 +1350,11 @@ async function handleSingleReferenceVideo(
     const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
 
     const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
-    const videoPrompt = buildVideoPrompt({
+    const videoPrompt = buildReferenceVideoPrompt({
       videoScript,
       motionScript: shot.motionScript ?? undefined,
       characterDescriptions: characterDescriptions || undefined,
       cameraDirection: shot.cameraDirection || "static",
-      startFrameDesc: shot.startFrameDesc ?? undefined,
-      endFrameDesc: shot.endFrameDesc ?? undefined,
-      duration: shot.duration ?? 10,
       dialogues: dialogueList.length > 0 ? dialogueList : undefined,
     });
 
@@ -1501,12 +1498,11 @@ async function handleBatchReferenceVideo(
 
       // Step 2: Generate video using scene frame as initial image
       const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
-      const videoPrompt = buildVideoPrompt({
+      const videoPrompt = buildReferenceVideoPrompt({
         videoScript,
+        motionScript: shot.motionScript ?? undefined,
+        characterDescriptions: characterDescriptions || undefined,
         cameraDirection: shot.cameraDirection || "static",
-        startFrameDesc: shot.startFrameDesc ?? undefined,
-        endFrameDesc: shot.endFrameDesc ?? undefined,
-        duration: shot.duration ?? 10,
         dialogues: dialogueList.length > 0 ? dialogueList : undefined,
       });
 

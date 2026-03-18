@@ -12,7 +12,7 @@ import { useModelGuard } from "@/hooks/use-model-guard";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
 import { apiFetch } from "@/lib/api-fetch";
 import { toast } from "sonner";
-import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
+import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import {
   Loader2,
   ChevronDown,
@@ -242,16 +242,27 @@ export function ShotCard({
   function handleCopyPrompt(e: React.MouseEvent) {
     e.stopPropagation();
     const resolvedVideoScript = videoScript || motionScript || prompt || "";
-    const videoPrompt = buildVideoPrompt({
-      videoScript: resolvedVideoScript,
-      cameraDirection,
-      startFrameDesc: startFrameDesc ?? undefined,
-      endFrameDesc: endFrameDesc ?? undefined,
-      duration: editDuration,
-      dialogues: dialogues.length > 0
-        ? dialogues.map((d) => ({ characterName: d.characterName, text: d.text }))
-        : undefined,
-    });
+    const dialogueList = dialogues.length > 0
+      ? dialogues.map((d) => ({ characterName: d.characterName, text: d.text }))
+      : undefined;
+    const videoPrompt = generationMode === "reference"
+      ? buildReferenceVideoPrompt({
+          videoScript: resolvedVideoScript,
+          motionScript: motionScript ?? undefined,
+          characterDescriptions: characterDescriptions || undefined,
+          cameraDirection,
+          dialogues: dialogueList,
+        })
+      : buildVideoPrompt({
+          videoScript: resolvedVideoScript,
+          motionScript: motionScript ?? undefined,
+          characterDescriptions: characterDescriptions || undefined,
+          cameraDirection,
+          startFrameDesc: startFrameDesc ?? undefined,
+          endFrameDesc: endFrameDesc ?? undefined,
+          duration: editDuration,
+          dialogues: dialogueList,
+        });
     navigator.clipboard.writeText(videoPrompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -307,12 +318,12 @@ export function ShotCard({
               <Clock className="h-3 w-3" />
               <input
                 type="number"
-                min={5}
+                min={8}
                 max={15}
                 value={editDuration}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
-                  const v = Math.min(15, Math.max(5, Number(e.target.value)));
+                  const v = Math.min(15, Math.max(8, Number(e.target.value)));
                   handleDurationChange(v);
                 }}
                 className="w-10 rounded border border-[--border-subtle] bg-white px-1 py-0.5 text-center text-[11px] font-medium text-[--text-primary] outline-none focus:border-primary/50"
@@ -597,11 +608,11 @@ export function ShotCard({
                     <Clock className="h-3.5 w-3.5 text-[--text-muted]" />
                     <input
                       type="number"
-                      min={5}
+                      min={8}
                       max={15}
                       value={editDuration}
                       onChange={(e) => {
-                        const v = Math.min(15, Math.max(5, Number(e.target.value)));
+                        const v = Math.min(15, Math.max(8, Number(e.target.value)));
                         handleDurationChange(v);
                       }}
                       className="w-10 bg-transparent text-center text-[11px] font-medium text-[--text-primary] outline-none"
