@@ -5,7 +5,15 @@ import { useModelStore } from "@/stores/model-store";
 import { ShotCard } from "@/components/editor/shot-card";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { StoryboardVersion } from "@/stores/project-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import {
   Film,
@@ -96,9 +104,22 @@ export default function StoryboardPage() {
   const [generatingFramesOverwrite, setGeneratingFramesOverwrite] = useState(false);
   const [generatingVideosOverwrite, setGeneratingVideosOverwrite] = useState(false);
   const [videoRatio, setVideoRatio] = useState("16:9");
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<StoryboardVersion[]>([]);
   const textGuard = useModelGuard("text");
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
+
+  useEffect(() => {
+    if (!project?.versions) return;
+    setVersions(project.versions);
+    setSelectedVersionId((current) => {
+      if (current === null && project.versions!.length > 0) {
+        return project.versions![0].id;
+      }
+      return current;
+    });
+  }, [project?.versions]);
 
   if (!project) return null;
 
@@ -176,6 +197,7 @@ export default function StoryboardPage() {
     }
 
     setGenerating(false);
+    setSelectedVersionId(null);
     await fetchProject(project.id);
   }
 
@@ -191,7 +213,7 @@ export default function StoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_frame_generate",
-          payload: { overwrite },
+          payload: { overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
         }),
       });
@@ -221,7 +243,7 @@ export default function StoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_video_generate",
-          payload: { ratio: videoRatio, overwrite },
+          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
         }),
       });
@@ -251,7 +273,7 @@ export default function StoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_scene_frame",
-          payload: { overwrite },
+          payload: { overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
         }),
       });
@@ -281,7 +303,7 @@ export default function StoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_reference_video",
-          payload: { ratio: videoRatio, overwrite },
+          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
         }),
       });
@@ -434,6 +456,27 @@ export default function StoryboardPage() {
               ? t("common.generating")
               : t("project.generateShots")}
           </Button>
+
+          {versions.length > 0 && (
+            <Select
+              value={selectedVersionId ?? ""}
+              onValueChange={(v) => {
+                setSelectedVersionId(v);
+                fetchProject(project!.id, v);
+              }}
+            >
+              <SelectTrigger size="sm" className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {versions.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           {/* Step 2: Batch generate frames — keyframe mode only */}
           {generationMode === "keyframe" && totalShots > 0 && (
