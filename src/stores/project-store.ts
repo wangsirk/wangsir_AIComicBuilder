@@ -36,6 +36,13 @@ interface Shot {
   dialogues: Dialogue[];
 }
 
+export type StoryboardVersion = {
+  id: string;
+  label: string;
+  versionNum: number;
+  createdAt: number;
+};
+
 interface Project {
   id: string;
   title: string;
@@ -46,12 +53,13 @@ interface Project {
   generationMode: "keyframe" | "reference";
   characters: Character[];
   shots: Shot[];
+  versions: StoryboardVersion[];
 }
 
 interface ProjectStore {
   project: Project | null;
   loading: boolean;
-  fetchProject: (id: string) => Promise<void>;
+  fetchProject: (id: string, versionId?: string) => Promise<void>;
   updateIdea: (idea: string) => void;
   updateScript: (script: string) => void;
   setProject: (project: Project) => void;
@@ -61,9 +69,10 @@ export const useProjectStore = create<ProjectStore>((set) => ({
   project: null,
   loading: false,
 
-  fetchProject: async (id: string) => {
+  fetchProject: async (id: string, versionId?: string) => {
     set({ loading: true });
-    const res = await apiFetch(`/api/projects/${id}`);
+    const url = `/api/projects/${id}${versionId ? `?versionId=${versionId}` : ""}`;
+    const res = await apiFetch(url);
     const data = await res.json();
     set({ project: data, loading: false });
   },
