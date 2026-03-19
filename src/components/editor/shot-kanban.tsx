@@ -13,6 +13,7 @@ interface KanbanShot {
   lastFrame: string | null;
   sceneRefFrame: string | null;
   videoPrompt: string | null;
+  /** Resolved video URL for the active generation mode (keyframe: videoUrl, reference: referenceVideoUrl). Must be pre-normalised by the caller. */
   videoUrl: string | null;
 }
 
@@ -43,6 +44,16 @@ interface KanbanColumn {
   icon: React.ReactNode;
 }
 
+function classifyShot(shot: KanbanShot) {
+  const hasFrame = !!(shot.sceneRefFrame || shot.firstFrame || shot.lastFrame);
+  const hasVideoPrompt = !!shot.videoPrompt;
+  const hasVideo = !!shot.videoUrl;
+  if (!hasFrame) return "frames";
+  if (!hasVideoPrompt) return "prompt";
+  if (!hasVideo) return "video";
+  return "done";
+}
+
 export function ShotKanban({
   shots,
   generationMode,
@@ -60,16 +71,6 @@ export function ShotKanban({
 }: ShotKanbanProps) {
   const t = useTranslations("project");
   const tCommon = useTranslations("common");
-
-  function classifyShot(shot: KanbanShot) {
-    const hasFrame = !!(shot.sceneRefFrame || shot.firstFrame || shot.lastFrame);
-    const hasVideoPrompt = !!shot.videoPrompt;
-    const hasVideo = !!shot.videoUrl;
-    if (!hasFrame) return "frames";
-    if (!hasVideoPrompt) return "prompt";
-    if (!hasVideo) return "video";
-    return "done";
-  }
 
   const frameShots = shots.filter((s) => classifyShot(s) === "frames");
   const promptShots = shots.filter((s) => classifyShot(s) === "prompt");
@@ -172,11 +173,14 @@ export function ShotKanban({
                     key={shot.id}
                     className="flex cursor-pointer items-center gap-2 rounded-lg border border-[--border-subtle] bg-white px-2 py-1.5 transition-colors hover:border-primary/30 hover:bg-primary/2"
                     onClick={() => onOpenDrawer(shot.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDrawer(shot.id); } }}
                   >
                     {/* Thumbnail */}
                     <div className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-[--border-subtle] bg-[--surface]">
                       {thumb ? (
-                        <img src={uploadUrl(thumb)} alt="" className="h-full w-full object-cover" />
+                        <img src={uploadUrl(thumb)} alt={`Shot ${shot.sequence}`} className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
                           <ImageIcon className="h-3 w-3 text-[--text-muted]" />
