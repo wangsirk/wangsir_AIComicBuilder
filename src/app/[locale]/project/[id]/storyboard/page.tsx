@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Play,
   Plus,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
@@ -26,6 +28,7 @@ import { toast } from "sonner";
 import { GenerationModeTab } from "@/components/editor/generation-mode-tab";
 import { ShotDrawer } from "@/components/editor/shot-drawer";
 import { CharactersInlinePanel } from "@/components/editor/characters-inline-panel";
+import { ShotKanban } from "@/components/editor/shot-kanban";
 import Link from "next/link";
 
 export default function StoryboardPage() {
@@ -45,6 +48,18 @@ export default function StoryboardPage() {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [versions, setVersions] = useState<StoryboardVersion[]>([]);
   const [openDrawerShotId, setOpenDrawerShotId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "kanban">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem(`storyboardView:${project?.id}`) as "list" | "kanban") || "list";
+    }
+    return "list";
+  });
+
+  function switchView(mode: "list" | "kanban") {
+    setViewMode(mode);
+    if (project) localStorage.setItem(`storyboardView:${project.id}`, mode);
+  }
+
   const textGuard = useModelGuard("text");
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
@@ -322,6 +337,32 @@ export default function StoryboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {totalShots > 0 && (
+            <div className="inline-flex gap-0.5 rounded-lg border border-[--border-subtle] bg-[--surface] p-0.5">
+              <button
+                onClick={() => switchView("list")}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                  viewMode === "list"
+                    ? "bg-white text-[--text-primary] shadow-xs"
+                    : "text-[--text-muted] hover:text-[--text-secondary]"
+                }`}
+              >
+                <List className="h-3.5 w-3.5" />
+                {t("project.viewList")}
+              </button>
+              <button
+                onClick={() => switchView("kanban")}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                  viewMode === "kanban"
+                    ? "bg-white text-[--text-primary] shadow-xs"
+                    : "text-[--text-muted] hover:text-[--text-secondary]"
+                }`}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                {t("project.viewKanban")}
+              </button>
+            </div>
+          )}
+          {totalShots > 0 && (
             <Link
               href={`/${locale}/project/${project!.id}/preview${selectedVersionId ? `?versionId=${selectedVersionId}` : ""}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground"
@@ -394,6 +435,7 @@ export default function StoryboardPage() {
         />
 
         {/* Batch operations */}
+        {viewMode === "list" && (
         <div className="space-y-2">
           {/* Row 1: Generate text / shots */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -570,6 +612,7 @@ export default function StoryboardPage() {
             </>
           )}
         </div>
+        )}
       </div>
 
       {/* Shot cards */}
@@ -585,6 +628,31 @@ export default function StoryboardPage() {
             {t("shot.noShots")}
           </p>
         </div>
+      ) : viewMode === "kanban" ? (
+        <ShotKanban
+          shots={project.shots.map((shot) => ({
+            id: shot.id,
+            sequence: shot.sequence,
+            prompt: shot.prompt,
+            firstFrame: shot.firstFrame,
+            lastFrame: shot.lastFrame,
+            sceneRefFrame: shot.sceneRefFrame,
+            videoPrompt: shot.videoPrompt,
+            videoUrl: generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl,
+          }))}
+          generationMode={generationMode}
+          anyGenerating={anyGenerating}
+          onOpenDrawer={(id) => setOpenDrawerShotId(id)}
+          onBatchFrames={() => handleBatchGenerateFrames(false)}
+          onBatchSceneFrames={() => handleBatchGenerateSceneFrames(false)}
+          onBatchVideoPrompts={handleBatchGenerateVideoPrompts}
+          onBatchVideos={() => handleBatchGenerateVideos(false)}
+          onBatchReferenceVideos={() => handleBatchGenerateReferenceVideos(false)}
+          generatingFrames={generatingFrames}
+          generatingSceneFrames={generatingSceneFrames}
+          generatingVideoPrompts={generatingVideoPrompts}
+          generatingVideos={generatingVideos}
+        />
       ) : (
         <div className="space-y-3">
           {project.shots.map((shot) => (
