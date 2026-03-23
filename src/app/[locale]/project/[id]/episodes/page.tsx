@@ -35,18 +35,15 @@ export default function EpisodesPage({
     fetchEpisodes(projectId);
   }, [projectId, fetchEpisodes]);
 
-  async function handleCreate(title: string) {
-    await createEpisode(projectId, title);
+  async function handleCreate(data: { title: string; description?: string; keywords?: string }) {
+    await createEpisode(projectId, data);
     toast.success(t("created"));
   }
 
-  async function handleEdit(episode: Episode) {
-    const newTitle = prompt(t("editTitle"), episode.title);
-    if (newTitle && newTitle.trim() && newTitle.trim() !== episode.title) {
-      await updateEpisode(projectId, episode.id, {
-        title: newTitle.trim(),
-      });
-    }
+  async function handleEdit(data: { title: string; description?: string; keywords?: string }) {
+    if (!editingEpisode) return;
+    await updateEpisode(projectId, editingEpisode.id, data);
+    setEditingEpisode(null);
   }
 
   async function handleDelete(episode: Episode) {
@@ -70,15 +67,15 @@ export default function EpisodesPage({
   }
 
   return (
-    <div className="mx-auto max-w-3xl flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
+    <div className="mx-auto max-w-4xl flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Layers className="h-4 w-4" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5">
+            <Layers className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-lg font-semibold text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
               {t("title")}
             </h2>
             <p className="text-xs text-[--text-muted]">
@@ -90,33 +87,44 @@ export default function EpisodesPage({
           {episodes.length > 0 && (
             <Link
               href={`/${locale}/project/${projectId}/episodes/${episodes[0]?.id}/characters`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"
             >
-              <Users className="h-3.5 w-3.5" />
+              <Users className="h-4 w-4" />
               {t("mainCharacter")}
             </Link>
           )}
-          <Button onClick={() => setCreateOpen(true)} size="sm">
+          <Button onClick={() => setCreateOpen(true)} className="rounded-xl">
             <Plus className="mr-1.5 h-4 w-4" />
             {t("create")}
           </Button>
         </div>
       </div>
 
-      {/* Episode list */}
+      {/* Episode grid */}
       {episodes.length === 0 ? (
-        <div className="flex min-h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-[--border-subtle] bg-white/50 p-8 text-center">
-          <Layers className="mb-3 h-10 w-10 text-[--text-muted]/40" />
-          <p className="text-sm text-[--text-muted]">{t("noEpisodes")}</p>
+        <div className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border border-dashed border-[--border-subtle] bg-white/50 p-8 text-center">
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-accent/10">
+            <Layers className="h-7 w-7 text-primary" />
+          </div>
+          <h3 className="font-display text-lg font-semibold text-[--text-primary]">
+            {t("title")}
+          </h3>
+          <p className="mt-2 max-w-sm text-sm text-[--text-secondary]">
+            {t("noEpisodes")}
+          </p>
+          <Button onClick={() => setCreateOpen(true)} className="mt-6 rounded-xl">
+            <Plus className="mr-1.5 h-4 w-4" />
+            {t("create")}
+          </Button>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           {episodes.map((episode) => (
             <EpisodeCard
               key={episode.id}
               episode={episode}
               projectId={projectId}
-              onEdit={handleEdit}
+              onEdit={(ep) => setEditingEpisode(ep)}
               onDelete={handleDelete}
             />
           ))}
@@ -129,6 +137,19 @@ export default function EpisodesPage({
         onOpenChange={setCreateOpen}
         onSubmit={handleCreate}
         mode="create"
+      />
+
+      {/* Edit dialog */}
+      <EpisodeDialog
+        open={!!editingEpisode}
+        onOpenChange={(open) => { if (!open) setEditingEpisode(null); }}
+        onSubmit={handleEdit}
+        defaultValues={editingEpisode ? {
+          title: editingEpisode.title,
+          description: editingEpisode.description || "",
+          keywords: editingEpisode.keywords || "",
+        } : undefined}
+        mode="edit"
       />
     </div>
   );

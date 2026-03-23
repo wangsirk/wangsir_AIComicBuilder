@@ -46,7 +46,7 @@ export async function POST(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const body = (await request.json()) as { title: string };
+  const body = (await request.json()) as { title: string; description?: string; keywords?: string };
 
   // Get the max sequence number for this project
   const [result] = await db
@@ -62,6 +62,8 @@ export async function POST(
       id: ulid(),
       projectId: id,
       title: body.title,
+      description: body.description || "",
+      keywords: body.keywords || "",
       sequence: nextSequence,
     })
     .returning();

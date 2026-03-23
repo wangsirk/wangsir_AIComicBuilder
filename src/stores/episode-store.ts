@@ -8,6 +8,8 @@ export interface Episode {
   sequence: number;
   idea: string | null;
   script: string | null;
+  description: string | null;
+  keywords: string | null;
   status: string;
   generationMode: "keyframe" | "reference";
   finalVideoUrl: string | null;
@@ -19,7 +21,7 @@ interface EpisodeStore {
   episodes: Episode[];
   loading: boolean;
   fetchEpisodes: (projectId: string) => Promise<void>;
-  createEpisode: (projectId: string, title: string) => Promise<Episode>;
+  createEpisode: (projectId: string, data: { title: string; description?: string; keywords?: string }) => Promise<Episode>;
   deleteEpisode: (projectId: string, episodeId: string) => Promise<void>;
   updateEpisode: (
     projectId: string,
@@ -40,11 +42,11 @@ export const useEpisodeStore = create<EpisodeStore>((set) => ({
     set({ episodes: data, loading: false });
   },
 
-  createEpisode: async (projectId: string, title: string) => {
+  createEpisode: async (projectId, data) => {
     const res = await apiFetch(`/api/projects/${projectId}/episodes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(data),
     });
     const created: Episode = await res.json();
     set((state) => ({ episodes: [...state.episodes, created] }));

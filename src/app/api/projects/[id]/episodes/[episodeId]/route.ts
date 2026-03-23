@@ -145,18 +145,22 @@ export async function PATCH(
 
   const body = (await request.json()) as Partial<{
     title: string;
+    description: string;
+    keywords: string;
     idea: string;
     script: string;
     status: "draft" | "processing" | "completed";
     generationMode: "keyframe" | "reference";
   }>;
 
-  const { title, idea, script, status, generationMode } = body;
+  const { title, description, keywords, idea, script, status, generationMode } = body;
 
   const [updated] = await db
     .update(episodes)
     .set({
       ...(title !== undefined && { title }),
+      ...(description !== undefined && { description }),
+      ...(keywords !== undefined && { keywords }),
       ...(idea !== undefined && { idea }),
       ...(script !== undefined && { script }),
       ...(status !== undefined && { status }),

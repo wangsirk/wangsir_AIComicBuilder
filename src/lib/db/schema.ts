@@ -38,6 +38,8 @@ export const episodes = sqliteTable("episodes", {
   generationMode: text("generation_mode", { enum: ["keyframe", "reference"] })
     .notNull()
     .default("keyframe"),
+  description: text("description").default(""),
+  keywords: text("keywords").default(""),
   finalVideoUrl: text("final_video_url"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
