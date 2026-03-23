@@ -166,6 +166,22 @@ export default function EpisodeCharactersPage() {
               referenceImage={char.referenceImage}
               onUpdate={() => fetchProject(project.id)}
               batchGenerating={generatingImages}
+              scope={char.scope}
+              onPromote={
+                char.scope === "guest"
+                  ? async () => {
+                      await apiFetch(
+                        `/api/projects/${project.id}/characters/${char.id}`,
+                        {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ scope: "main", episodeId: null }),
+                        }
+                      );
+                      fetchProject(project.id);
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>

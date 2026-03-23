@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, ArrowUpCircle } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -24,6 +24,8 @@ interface CharacterCardProps {
   referenceImage: string | null;
   onUpdate: () => void;
   batchGenerating?: boolean;
+  scope?: string;
+  onPromote?: () => void;
 }
 
 export function CharacterCard({
@@ -35,6 +37,8 @@ export function CharacterCard({
   referenceImage,
   onUpdate,
   batchGenerating,
+  scope,
+  onPromote,
 }: CharacterCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -114,6 +118,30 @@ export function CharacterCard({
           </div>
         )}
       </div>
+
+      {/* Scope badge */}
+      {scope && (
+        <div className="flex items-center gap-2 px-4 pt-3">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              scope === "main"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-purple-100 text-purple-700"
+            }`}
+          >
+            {scope === "main" ? t("episode.mainCharacter") : t("episode.guestCharacter")}
+          </span>
+          {scope === "guest" && onPromote && (
+            <button
+              onClick={onPromote}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <ArrowUpCircle className="h-3 w-3" />
+              {t("episode.promoteToMain")}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Info */}
       <div className="space-y-3 p-4">
