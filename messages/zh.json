@@ -143,7 +143,10 @@
     "editDetails": "编辑详情",
     "regenerateFrames": "重新生成帧",
     "regeneratePrompt": "重新生成提示词",
-    "regenerateVideo": "重新生成视频"
+    "regenerateVideo": "重新生成视频",
+    "referenceImages": "参考图",
+    "addRefImage": "添加参考图",
+    "maxRefImages": "最多9张参考图"
   },
   "storyboard": {
     "stale": "需要更新",

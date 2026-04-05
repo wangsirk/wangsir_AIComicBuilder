@@ -45,6 +45,7 @@ interface Shot {
   soundDesign?: string;
   musicCue?: string;
   qualityScore?: number;
+  referenceImages?: string; // JSON string of image URL array
   qualityIssues?: string[];
   isStale?: boolean;
   status: string;

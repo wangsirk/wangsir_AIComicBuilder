@@ -1885,12 +1885,18 @@ async function handleSingleReferenceVideo(
 
     console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
+    // Use shot-level reference images if available, otherwise fall back to character refs
+    const shotRefImages: string[] = shot.referenceImages ? JSON.parse(shot.referenceImages as string) : [];
+    const allRefImages = shotRefImages.length > 0
+      ? shotRefImages
+      : charRefs.map((c) => c.imagePath);
+
     const result = await videoProvider.generateVideo({
       initialImage: sceneFramePath,
       prompt: videoPrompt,
       duration: effectiveDuration,
       ratio,
-      referenceImages: charRefs.map((c) => c.imagePath),
+      referenceImages: allRefImages,
     });
 
     await db
@@ -2070,12 +2076,18 @@ async function handleBatchReferenceVideo(
 
         console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
+        // Use shot-level reference images if available, otherwise fall back to character refs
+        const shotRefImages: string[] = shot.referenceImages ? JSON.parse(shot.referenceImages as string) : [];
+        const allRefImages = shotRefImages.length > 0
+          ? shotRefImages
+          : charRefs.map((c) => c.imagePath);
+
         const result = await videoProvider.generateVideo({
           initialImage: sceneFramePath,
           prompt: videoPrompt,
           duration: effectiveDuration,
           ratio,
-          referenceImages: charRefs.map((c) => c.imagePath),
+          referenceImages: allRefImages,
         });
 
         await db

@@ -143,7 +143,10 @@
     "editDetails": "詳細編集",
     "regenerateFrames": "フレームを再生成",
     "regeneratePrompt": "プロンプトを再生成",
-    "regenerateVideo": "動画を再生成"
+    "regenerateVideo": "動画を再生成",
+    "referenceImages": "参照画像",
+    "addRefImage": "参照を追加",
+    "maxRefImages": "最大9枚の参照画像"
   },
   "storyboard": {
     "stale": "更新が必要",

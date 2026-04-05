@@ -8,7 +8,7 @@ import { ulid } from "ulid";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
-const ALLOWED_FIELDS = ["firstFrame", "lastFrame", "sceneRefFrame"] as const;
+const ALLOWED_FIELDS = ["firstFrame", "lastFrame", "sceneRefFrame", "reference_image"] as const;
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
 
 export async function POST(
@@ -34,6 +34,11 @@ export async function POST(
   fs.mkdirSync(dir, { recursive: true });
   const filepath = path.join(dir, filename);
   fs.writeFileSync(filepath, buffer);
+
+  // For reference_image uploads, just return the file path without updating a DB column
+  if (field === "reference_image") {
+    return NextResponse.json({ url: filepath });
+  }
 
   const [updated] = await db
     .update(shots)

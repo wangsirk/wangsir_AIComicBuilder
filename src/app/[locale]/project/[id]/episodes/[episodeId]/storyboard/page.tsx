@@ -987,6 +987,7 @@ export default function EpisodeStoryboardPage() {
               firstFrame={shot.firstFrame}
               lastFrame={shot.lastFrame}
               sceneRefFrame={shot.sceneRefFrame}
+              referenceImages={shot.referenceImages}
               videoPrompt={shot.videoPrompt}
               transitionIn={shot.transitionIn}
               transitionOut={shot.transitionOut}

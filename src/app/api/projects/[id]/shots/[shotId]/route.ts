@@ -24,6 +24,7 @@ export async function PATCH(
     depthOfField: string;
     soundDesign: string;
     musicCue: string;
+    referenceImages: string;
   }>;
 
   const [updated] = await db

@@ -143,7 +143,10 @@
     "editDetails": "Edit Details",
     "regenerateFrames": "Regenerate Frames",
     "regeneratePrompt": "Regenerate Prompt",
-    "regenerateVideo": "Regenerate Video"
+    "regenerateVideo": "Regenerate Video",
+    "referenceImages": "Reference Images",
+    "addRefImage": "Add Reference",
+    "maxRefImages": "Max 9 reference images"
   },
   "storyboard": {
     "stale": "Outdated",

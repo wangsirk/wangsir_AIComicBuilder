@@ -94,6 +94,7 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   private buildKeyframeBody(params: VideoGenerateParams & { firstFrame: string; lastFrame: string }): Record<string, unknown> {
+    const isSeedance2 = this.model.includes("seedance-2");
     return {
       model: this.model,
       content: [
@@ -104,21 +105,50 @@ export class SeedanceProvider implements VideoProvider {
       duration: params.duration || 5,
       ratio: params.ratio || "16:9",
       watermark: false,
+      ...(isSeedance2 && { generate_audio: true }),
     };
   }
 
-  // Reference mode: use a single initial image (character reference or previous shot's last frame)
+  // Reference mode: use initial image, optionally with multi-reference images (Seedance 2.0)
   private buildReferenceBody(params: VideoGenerateParams & { initialImage: string }): Record<string, unknown> {
+    const isSeedance2 = this.model.includes("seedance-2");
+
+    const content: Record<string, unknown>[] = [
+      { type: "text", text: params.prompt },
+    ];
+
+    // Seedance 2.0 multi-reference mode: initialImage + referenceImages all as reference_image role
+    if (params.referenceImages && params.referenceImages.length > 0) {
+      // Add initial image as first reference
+      content.push({
+        type: "image_url",
+        image_url: { url: toImageUrl(params.initialImage) },
+        role: "reference_image",
+      });
+      // Add additional reference images (up to 9 total)
+      for (const refImg of params.referenceImages.slice(0, 8)) {
+        content.push({
+          type: "image_url",
+          image_url: { url: toImageUrl(refImg) },
+          role: "reference_image",
+        });
+      }
+    } else {
+      // Legacy single-image reference mode (Seedance 1.5)
+      content.push({
+        type: "image_url",
+        image_url: { url: toImageUrl(params.initialImage) },
+      });
+    }
+
     return {
       model: this.model,
-      content: [
-        { type: "text", text: params.prompt },
-        { type: "image_url", image_url: { url: toImageUrl(params.initialImage) } },
-      ],
+      content,
       duration: params.duration || 5,
       ratio: params.ratio || "16:9",
       return_last_frame: true,
       watermark: false,
+      ...(isSeedance2 && { generate_audio: true }),
     };
   }
 

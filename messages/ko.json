@@ -143,7 +143,10 @@
     "editDetails": "상세 편집",
     "regenerateFrames": "프레임 재생성",
     "regeneratePrompt": "프롬프트 재생성",
-    "regenerateVideo": "비디오 재생성"
+    "regenerateVideo": "비디오 재생성",
+    "referenceImages": "참조 이미지",
+    "addRefImage": "참조 추가",
+    "maxRefImages": "최대 9개의 참조 이미지"
   },
   "storyboard": {
     "stale": "업데이트 필요",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
@@ -26,6 +26,7 @@ import {
   XCircle,
   Upload,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 
@@ -50,6 +51,7 @@ interface ShotCardProps {
   lastFrame: string | null;
   videoUrl: string | null;
   sceneRefFrame?: string | null;
+  referenceImages?: string; // JSON array of image paths
   videoPrompt?: string | null;
   transitionIn?: string;
   transitionOut?: string;
@@ -159,6 +161,7 @@ export function ShotCard({
   lastFrame,
   videoUrl,
   sceneRefFrame,
+  referenceImages,
   videoPrompt,
   transitionIn,
   transitionOut,
@@ -215,6 +218,16 @@ export function ShotCard({
 
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
+
+  // Parse multi-reference images
+  const parsedRefImages: string[] = useMemo(() => {
+    try {
+      const parsed = JSON.parse(referenceImages || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [referenceImages]);
 
   // Derived state
   const hasText = !!(prompt || startFrameDesc || motionScript);
@@ -348,6 +361,65 @@ export function ShotCard({
   async function handleClearFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
     await patchShot({ [field]: null });
     onUpdate();
+  }
+
+  async function handleAddRefImage() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("field", "reference_image");
+
+      try {
+        const resp = await apiFetch(`/api/projects/${projectId}/shots/${id}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!resp.ok) throw new Error("Upload failed");
+        const data = await resp.json();
+
+        // Add to reference images array
+        const updatedRefs = [...parsedRefImages, data.url];
+        await patchShot({ referenceImages: JSON.stringify(updatedRefs) });
+        onUpdate();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to upload reference image");
+      }
+    };
+    input.click();
+  }
+
+  async function handleRemoveRefImage(index: number) {
+    const updatedRefs = parsedRefImages.filter((_, i) => i !== index);
+    await patchShot({ referenceImages: JSON.stringify(updatedRefs) });
+    onUpdate();
+  }
+
+  async function handleRegenerateRefImage(index: number) {
+    if (!imageGuard()) return;
+
+    try {
+      const modelConfig = getModelConfig();
+      const resp = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_scene_frame",
+          payload: { shotId: id, refImageIndex: index },
+          modelConfig,
+        }),
+      });
+      if (!resp.ok) throw new Error("Regeneration failed");
+      toast.success(`Reference image ${index + 1} regenerating...`);
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to regenerate reference image");
+    }
   }
 
   function handleUploadFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
@@ -707,48 +779,129 @@ export function ShotCard({
           isNext={nextStep === "frame"}
         >
           {/* Frame thumbnails */}
-          <div className="mb-2.5 flex gap-2">
-            {frameAssets.map((asset, i) => {
-              const fieldName = generationMode === "reference"
-                ? "sceneRefFrame" as const
-                : (i === 0 ? "firstFrame" : "lastFrame") as "firstFrame" | "lastFrame";
-              const isUploading = uploadingField === fieldName;
-              return (
-                <div key={i} className="flex flex-col gap-1" style={{ width: generationMode === "reference" ? "100%" : "50%" }}>
-                  <div
-                    className={`relative overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${asset.src && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-                    onClick={() => asset.src && !isUploading && setPreviewSrc(uploadUrl(asset.src))}
-                  >
-                    {isUploading ? (
-                      <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
-                    ) : asset.src ? (
-                      <img src={uploadUrl(asset.src)} className="w-full object-contain" />
-                    ) : (
-                      <div className="flex h-16 items-center justify-center"><ImageIcon className="h-4 w-4 text-[--text-muted]" /></div>
-                    )}
+          {generationMode === "reference" ? (
+            <div className="mb-2.5 space-y-2">
+              {/* Reference images grid */}
+              <div className="grid grid-cols-3 gap-2">
+                {parsedRefImages.map((img, idx) => (
+                  <div key={idx} className="relative group">
+                    <div
+                      className="overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] cursor-pointer hover:opacity-80 transition-opacity aspect-video"
+                      onClick={() => setPreviewSrc(uploadUrl(img))}
+                    >
+                      <img src={uploadUrl(img)} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleRegenerateRefImage(idx); }}
+                        className="rounded bg-black/60 p-0.5 text-white hover:bg-black/80"
+                        title="Regenerate"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleRemoveRefImage(idx); }}
+                        className="rounded bg-black/60 p-0.5 text-white hover:bg-red-600/80"
+                        title="Remove"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[9px] text-white">
+                      {idx + 1}
+                    </span>
                   </div>
-                  <div className="flex gap-1">
+                ))}
+
+                {/* Add reference image button */}
+                {parsedRefImages.length < 9 && (
+                  <button
+                    onClick={handleAddRefImage}
+                    className="flex items-center justify-center rounded-lg border-2 border-dashed border-[--border-subtle] aspect-video text-[--text-muted] hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Also show sceneRefFrame if it exists and is not in the ref images list */}
+              {sceneRefFrame && !parsedRefImages.includes(sceneRefFrame) && (
+                <div className="flex items-center gap-2 text-xs text-[--text-muted]">
+                  <img src={uploadUrl(sceneRefFrame)} className="h-10 w-16 rounded border object-cover" />
+                  <span>{t("shot.sceneRefFrame")}</span>
+                  <div className="flex gap-1 ml-auto">
                     <button
-                      onClick={() => handleUploadFrame(fieldName)}
-                      disabled={isUploading}
-                      className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[--border-subtle] bg-white py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+                      onClick={() => handleUploadFrame("sceneRefFrame")}
+                      className="flex items-center gap-1 rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] hover:border-primary/40 hover:text-primary"
                     >
                       <Upload className="h-2.5 w-2.5" />
-                      上传
                     </button>
-                    {asset.src && (
-                      <button
-                        onClick={() => handleClearFrame(fieldName)}
-                        className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-red-300 hover:text-red-500"
-                      >
-                        <Trash2 className="h-2.5 w-2.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleClearFrame("sceneRefFrame")}
+                      className="flex items-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] hover:border-red-300 hover:text-red-500"
+                    >
+                      <Trash2 className="h-2.5 w-2.5" />
+                    </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              )}
+              {!sceneRefFrame && (
+                <div className="flex items-center gap-2">
+                  <div className="flex h-10 w-16 items-center justify-center rounded border border-[--border-subtle] bg-[--surface]">
+                    <ImageIcon className="h-3.5 w-3.5 text-[--text-muted]" />
+                  </div>
+                  <span className="text-xs text-[--text-muted]">{t("shot.sceneRefFrame")}</span>
+                  <button
+                    onClick={() => handleUploadFrame("sceneRefFrame")}
+                    className="ml-auto flex items-center gap-1 rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] hover:border-primary/40 hover:text-primary"
+                  >
+                    <Upload className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mb-2.5 flex gap-2">
+              {frameAssets.map((asset, i) => {
+                const fieldName = (i === 0 ? "firstFrame" : "lastFrame") as "firstFrame" | "lastFrame";
+                const isUploading = uploadingField === fieldName;
+                return (
+                  <div key={i} className="flex flex-col gap-1" style={{ width: "50%" }}>
+                    <div
+                      className={`relative overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${asset.src && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                      onClick={() => asset.src && !isUploading && setPreviewSrc(uploadUrl(asset.src))}
+                    >
+                      {isUploading ? (
+                        <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
+                      ) : asset.src ? (
+                        <img src={uploadUrl(asset.src)} className="w-full object-contain" />
+                      ) : (
+                        <div className="flex h-16 items-center justify-center"><ImageIcon className="h-4 w-4 text-[--text-muted]" /></div>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleUploadFrame(fieldName)}
+                        disabled={isUploading}
+                        className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[--border-subtle] bg-white py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+                      >
+                        <Upload className="h-2.5 w-2.5" />
+                        上传
+                      </button>
+                      {asset.src && (
+                        <button
+                          onClick={() => handleClearFrame(fieldName)}
+                          className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-red-300 hover:text-red-500"
+                        >
+                          <Trash2 className="h-2.5 w-2.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <Button
             size="xs"
             variant={nextStep === "frame" ? "default" : "outline"}
