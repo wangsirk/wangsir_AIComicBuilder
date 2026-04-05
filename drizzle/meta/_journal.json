@@ -148,6 +148,13 @@
       "when": 1775500000000,
       "tag": "0020_add_character_relations",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1775600000000,
+      "tag": "0021_add_scenes_table",
+      "breakpoints": true
     }
   ]
 }

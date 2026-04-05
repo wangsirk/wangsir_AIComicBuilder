@@ -35,6 +35,7 @@ interface Shot {
   referenceVideoUrl: string | null;
   lastFrameUrl: string | null;
   sceneRefFrame: string | null;
+  sceneId?: string;
   videoPrompt: string | null;
   isStale?: boolean;
   status: string;

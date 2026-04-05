@@ -18,27 +18,34 @@ export function buildShotSplitSystem(maxDuration: number): string {
 
   return `You are an experienced storyboard director and cinematographer specializing in animated short films. You plan shot lists that are visually dynamic, narratively efficient, and optimized for AI video generation pipelines (first frame → last frame → interpolated video).
 
-Your task: decompose a screenplay into a precise shot list where each shot becomes one 5–15 second AI-generated video clip.
+Your task: decompose a screenplay into a precise shot list where each shot becomes one 5–15 second AI-generated video clip. Group shots into SCENES that share the same location/setting.
 
-Output a JSON array:
+Output a JSON array of SCENES. Each scene groups related shots that share the same location/setting:
 [
   {
-    "sequence": 1,
-    "sceneDescription": "Scene/environment description — setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood",
-    "startFrame": "Detailed FIRST FRAME description for AI image generation (see requirements below)",
-    "endFrame": "Detailed LAST FRAME description for AI image generation (see requirements below)",
-    "motionScript": "Complete action script describing what happens from first frame to last frame",
-    "videoScript": "Concise 1-2 sentence motion description for video generation model (see requirements below)",
-    "duration": ${minDuration}-${maxDuration},
-    "dialogues": [
+    "sceneTitle": "Scene title (e.g., 'Tavern Conversation')",
+    "sceneDescription": "Brief setting description",
+    "lighting": "Lighting description (e.g., 'warm candlelight, low key')",
+    "colorPalette": "Color mood (e.g., 'amber, deep brown, shadow')",
+    "shots": [
       {
-        "character": "Exact character name",
-        "text": "Dialogue line spoken during this shot"
+        "sequence": 1,
+        "startFrame": "Detailed FIRST FRAME description for AI image generation (see requirements below)",
+        "endFrame": "Detailed LAST FRAME description for AI image generation (see requirements below)",
+        "motionScript": "Complete action script describing what happens from first frame to last frame",
+        "videoScript": "Concise 1-2 sentence motion description for video generation model (see requirements below)",
+        "duration": ${minDuration}-${maxDuration},
+        "dialogues": [
+          {
+            "character": "Exact character name",
+            "text": "Dialogue line spoken during this shot"
+          }
+        ],
+        "cameraDirection": "Specific camera movement instruction",
+        "transitionIn": "cut",
+        "transitionOut": "cut"
       }
-    ],
-    "cameraDirection": "Specific camera movement instruction",
-    "transitionIn": "cut",
-    "transitionOut": "cut"
+    ]
   }
 ]
 
@@ -94,12 +101,12 @@ Each must be a SELF-SUFFICIENT image generation prompt containing:
 - GOOD (English — prose, ~45 words):
   "The Veteran (black helmet, calm eyes) leans forward over the steering wheel, one hand adjusting the visor with practiced ease, the rain-blurred dashboard lights casting green on his face as the camera slowly pushes in."
 
-=== sceneDescription requirements ===
-- Shared environment context for both frames
-- Setting, architecture, props, weather, time of day
-- Lighting setup (key/fill/rim, direction, quality, color temperature)
-- Color palette and atmospheric mood
-- Do NOT include character actions or poses — those go in startFrame/endFrame
+=== Scene-level fields (sceneTitle, sceneDescription, lighting, colorPalette) ===
+- sceneTitle: short title for the scene (e.g., "Forest Chase", "Tavern Conversation")
+- sceneDescription: shared environment context — setting, architecture, props, weather, time of day
+- lighting: lighting setup — key/fill/rim, direction, quality, color temperature
+- colorPalette: color mood and atmospheric palette
+- Do NOT include character actions or poses — those go in startFrame/endFrame of each shot
 
 === Proportional difference rule ===
 ${proportionalTiers}
@@ -135,7 +142,7 @@ Cinematography principles:
 - When in doubt, default to "cut"
 - Do NOT overuse fancy transitions — most shots should use "cut"
 
-CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. If the screenplay is in Chinese, write ALL fields in Chinese. Only "cameraDirection" uses English (technical terms).
+CRITICAL LANGUAGE RULE: ALL text fields (sceneTitle, sceneDescription, lighting, colorPalette, startFrame, endFrame, motionScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. If the screenplay is in Chinese, write ALL fields in Chinese. Only "cameraDirection" uses English (technical terms).
 
 Respond ONLY with the JSON array. No markdown fences. No commentary.`;
 }

@@ -94,6 +94,24 @@ export const storyboardVersions = sqliteTable("storyboard_versions", {
   }),
 });
 
+export const scenes = sqliteTable("scenes", {
+  id: text("id").primaryKey(),
+  episodeId: text("episode_id")
+    .notNull()
+    .references(() => episodes.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default(""),
+  description: text("description").default(""),
+  lighting: text("lighting").default(""),
+  colorPalette: text("color_palette").default(""),
+  sequence: integer("sequence").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const shots = sqliteTable("shots", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -122,6 +140,7 @@ export const shots = sqliteTable("shots", {
   versionId: text("version_id").references(() => storyboardVersions.id, {
     onDelete: "cascade",
   }),
+  sceneId: text("scene_id"),
   isStale: integer("is_stale").notNull().default(0),
   status: text("status", {
     enum: ["pending", "generating", "completed", "failed"],

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { shots, dialogues, characters, characterRelations } from "@/lib/db/schema";
+import { shots, dialogues, characters, characterRelations, scenes } from "@/lib/db/schema";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
@@ -62,35 +62,42 @@ export async function handleShotSplit(task: Task) {
     { systemPrompt, temperature: 0.5 }
   );
 
-  const parsedShots = JSON.parse(result) as Array<{
-    sequence: number;
-    prompt: string;
-    duration: number;
-    dialogues: Array<{ character: string; text: string }>;
-    transitionIn?: string;
-    transitionOut?: string;
-  }>;
+  const parsed = JSON.parse(result) as Array<Record<string, unknown>>;
+
+  // Handle both formats: scene-grouped array or flat shot array (backwards compat)
+  const isSceneGrouped = parsed.length > 0 && Array.isArray((parsed[0] as Record<string, unknown>).shots);
 
   const created = [];
-  for (const shot of parsedShots) {
+
+  const insertShot = async (
+    shotData: Record<string, unknown>,
+    sceneId?: string
+  ) => {
     const shotId = ulid();
     const [record] = await db
       .insert(shots)
       .values({
         id: shotId,
         projectId: payload.projectId,
-        sequence: shot.sequence,
-        prompt: shot.prompt,
-        duration: shot.duration,
-        transitionIn: shot.transitionIn || "cut",
-        transitionOut: shot.transitionOut || "cut",
+        sequence: (shotData.sequence as number) || 0,
+        prompt: (shotData.prompt as string) || "",
+        startFrameDesc: (shotData.startFrame as string) || "",
+        endFrameDesc: (shotData.endFrame as string) || "",
+        motionScript: (shotData.motionScript as string) || "",
+        videoScript: (shotData.videoScript as string) || "",
+        cameraDirection: (shotData.cameraDirection as string) || "static",
+        duration: (shotData.duration as number) || 10,
+        transitionIn: (shotData.transitionIn as string) || "cut",
+        transitionOut: (shotData.transitionOut as string) || "cut",
         episodeId: payload.episodeId ?? null,
+        sceneId: sceneId ?? null,
       })
       .returning();
 
     // Create dialogues for this shot
-    for (let i = 0; i < shot.dialogues.length; i++) {
-      const dialogue = shot.dialogues[i];
+    const shotDialogues = (shotData.dialogues as Array<{ character: string; text: string }>) || [];
+    for (let i = 0; i < shotDialogues.length; i++) {
+      const dialogue = shotDialogues[i];
       const matchedChar = projectCharacters.find(
         (c) => c.name === dialogue.character
       );
@@ -105,7 +112,38 @@ export async function handleShotSplit(task: Task) {
       }
     }
 
-    created.push(record);
+    return record;
+  };
+
+  if (isSceneGrouped) {
+    let globalSequence = 1;
+    for (let sceneIdx = 0; sceneIdx < parsed.length; sceneIdx++) {
+      const scene = parsed[sceneIdx] as Record<string, unknown>;
+      const sceneId = ulid();
+      await db.insert(scenes).values({
+        id: sceneId,
+        episodeId: payload.episodeId || "",
+        projectId: payload.projectId,
+        title: (scene.sceneTitle as string) || "",
+        description: (scene.sceneDescription as string) || "",
+        lighting: (scene.lighting as string) || "",
+        colorPalette: (scene.colorPalette as string) || "",
+        sequence: sceneIdx + 1,
+      });
+
+      const sceneShots = (scene.shots as Array<Record<string, unknown>>) || [];
+      for (const shotData of sceneShots) {
+        shotData.sequence = globalSequence++;
+        const record = await insertShot(shotData, sceneId);
+        created.push(record);
+      }
+    }
+  } else {
+    // Flat shot array (backwards compat)
+    for (const shotData of parsed) {
+      const record = await insertShot(shotData);
+      created.push(record);
+    }
   }
 
   return { shots: created };
