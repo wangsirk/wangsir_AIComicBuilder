@@ -40,6 +40,10 @@ interface Shot {
   transitionOut?: string;
   videoPrompt: string | null;
   compositionGuide?: string;
+  focalPoint?: string;
+  depthOfField?: string;
+  soundDesign?: string;
+  musicCue?: string;
   qualityScore?: number;
   qualityIssues?: string[];
   isStale?: boolean;

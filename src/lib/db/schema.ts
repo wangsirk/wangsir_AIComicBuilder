@@ -16,6 +16,8 @@ export const projects = sqliteTable("projects", {
   generationMode: text('generation_mode', { enum: ['keyframe', 'reference'] }).notNull().default('keyframe'),
   useProjectPrompts: integer("use_project_prompts").notNull().default(0),
   colorPalette: text("color_palette").default(""),
+  worldSetting: text("world_setting").default(""),
+  targetDuration: integer("target_duration").default(0),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -46,6 +48,7 @@ export const episodes = sqliteTable("episodes", {
   keywords: text("keywords").default(""),
   scriptHash: text("script_hash").default(""),
   colorPalette: text("color_palette").default(""),
+  targetDuration: integer("target_duration").default(0),
   finalVideoUrl: text("final_video_url"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -144,6 +147,10 @@ export const shots = sqliteTable("shots", {
   }),
   sceneId: text("scene_id"),
   compositionGuide: text("composition_guide").default(""),
+  focalPoint: text("focal_point").default(""),
+  depthOfField: text("depth_of_field").default("medium"),
+  soundDesign: text("sound_design").default(""),
+  musicCue: text("music_cue").default(""),
   isStale: integer("is_stale").notNull().default(0),
   status: text("status", {
     enum: ["pending", "generating", "completed", "failed"],

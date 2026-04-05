@@ -54,6 +54,10 @@ interface ShotCardProps {
   transitionIn?: string;
   transitionOut?: string;
   compositionGuide?: string;
+  focalPoint?: string;
+  depthOfField?: string;
+  soundDesign?: string;
+  musicCue?: string;
   isStale?: boolean;
   status: string;
   dialogues: Dialogue[];
@@ -159,6 +163,10 @@ export function ShotCard({
   transitionIn,
   transitionOut,
   compositionGuide,
+  focalPoint,
+  depthOfField,
+  soundDesign,
+  musicCue,
   isStale,
   status,
   dialogues,
@@ -550,7 +558,23 @@ export function ShotCard({
                 {compositionGuide.replace(/_/g, " ")}
               </span>
             )}
+            {focalPoint && (
+              <span className="text-xs text-[--text-muted]">
+                focus: {focalPoint}
+              </span>
+            )}
+            {depthOfField && depthOfField !== "medium" && (
+              <span className="text-xs text-[--text-muted]">
+                DoF: {depthOfField}
+              </span>
+            )}
           </div>
+          {(soundDesign || musicCue) && (
+            <div className="mt-1 flex items-center gap-2 flex-wrap text-xs text-[--text-muted]">
+              {soundDesign && <span>SFX: {soundDesign}</span>}
+              {musicCue && <span>Music: {musicCue}</span>}
+            </div>
+          )}
         </div>
 
         {/* Right actions */}

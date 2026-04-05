@@ -43,6 +43,10 @@ Output a JSON array of SCENES. Each scene groups related shots that share the sa
         ],
         "cameraDirection": "Specific camera movement instruction",
         "compositionGuide": "rule_of_thirds",
+        "focalPoint": "what the camera focuses on (character name or key object)",
+        "depthOfField": "shallow | medium | deep",
+        "soundDesign": "environmental/ambient sounds for this shot",
+        "musicCue": "music direction for this shot",
         "transitionIn": "cut",
         "transitionOut": "cut"
       }
@@ -61,6 +65,14 @@ Output a JSON array of SCENES. Each scene groups related shots that share the sa
 - "frame_within_frame": Subject framed by doorway/window/arch. Best for: isolation, surveillance, transition
 - "leading_lines": Lines guide eye to subject. Best for: journeys, reveals, depth
 - "center_dominant": Subject dead center. Best for: impact, announcement, portrait
+
+=== focalPoint & depthOfField ===
+- "focalPoint": what the camera focuses on (character name or key object). e.g., "protagonist's face", "the ancient sword"
+- "depthOfField": "shallow" (blurred background, cinematic bokeh) | "medium" (balanced) | "deep" (everything in focus)
+
+=== soundDesign & musicCue ===
+- "soundDesign": environmental/ambient sounds for this shot. e.g., "rain on roof, distant thunder", "busy market crowd", "eerie silence"
+- "musicCue": music direction. e.g., "tense strings crescendo", "silence", "soft piano melody fading in", "upbeat percussion"
 
 === transitionIn & transitionOut ===
 - Values: "cut" | "dissolve" | "fade_in" | "fade_out" | "wipeleft" | "circleopen". Default "cut".

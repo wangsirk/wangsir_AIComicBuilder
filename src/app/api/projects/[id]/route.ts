@@ -113,9 +113,11 @@ export async function PATCH(
     generationMode: "keyframe" | "reference";
     useProjectPrompts: number;
     colorPalette: string;
+    worldSetting: string;
+    targetDuration: number;
   }>;
 
-  const { title, idea, script, outline, status, generationMode, useProjectPrompts, colorPalette } = body;
+  const { title, idea, script, outline, status, generationMode, useProjectPrompts, colorPalette, worldSetting, targetDuration } = body;
 
   const [updated] = await db
     .update(projects)
@@ -128,6 +130,8 @@ export async function PATCH(
       ...(generationMode !== undefined && { generationMode }),
       ...(useProjectPrompts !== undefined && { useProjectPrompts }),
       ...(colorPalette !== undefined && { colorPalette }),
+      ...(worldSetting !== undefined && { worldSetting }),
+      ...(targetDuration !== undefined && { targetDuration }),
       updatedAt: new Date(),
     })
     .where(eq(projects.id, id))

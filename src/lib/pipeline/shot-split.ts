@@ -50,14 +50,18 @@ export async function handleShotSplit(task: Task) {
     relationsText += "\nUse these relationships to inform framing, character proximity, and eye direction in compositions.\n";
   }
 
+  // Fetch project data
+  const [project] = await db.select().from(projects).where(eq(projects.id, payload.projectId));
+
   // Fetch color palette from project or episode
   let colorPalette = "";
+  let targetDuration = project?.targetDuration || 0;
   if (payload.episodeId) {
     const [episode] = await db.select().from(episodes).where(eq(episodes.id, payload.episodeId));
     if (episode?.colorPalette) colorPalette = episode.colorPalette;
+    if (episode?.targetDuration && episode.targetDuration > 0) targetDuration = episode.targetDuration;
   }
   if (!colorPalette) {
-    const [project] = await db.select().from(projects).where(eq(projects.id, payload.projectId));
     if (project?.colorPalette) colorPalette = project.colorPalette;
   }
 
@@ -67,7 +71,17 @@ export async function handleShotSplit(task: Task) {
   });
 
   const ai = resolveAIProvider(payload.modelConfig);
-  const userPrompt = buildShotSplitPrompt(payload.screenplay, characterDescriptions, undefined, colorPalette || undefined) + relationsText;
+  let userPrompt = buildShotSplitPrompt(payload.screenplay, characterDescriptions, undefined, colorPalette || undefined) + relationsText;
+
+  // Inject world setting
+  if (project?.worldSetting) {
+    userPrompt = `【World Setting】\n${project.worldSetting}\n\nAll shots must be consistent with this world setting.\n\n` + userPrompt;
+  }
+
+  // Inject target duration
+  if (targetDuration && targetDuration > 0) {
+    userPrompt += `\n\nTarget total duration: ${targetDuration} seconds (${Math.floor(targetDuration / 60)}m${targetDuration % 60}s). Ensure all shot durations sum to approximately this target.\n`;
+  }
   const result = await ai.generateText(
     userPrompt,
     { systemPrompt, temperature: 0.5 }
@@ -101,6 +115,10 @@ export async function handleShotSplit(task: Task) {
         transitionIn: (shotData.transitionIn as string) || "cut",
         transitionOut: (shotData.transitionOut as string) || "cut",
         compositionGuide: (shotData.compositionGuide as string) || "",
+        focalPoint: (shotData.focalPoint as string) || "",
+        depthOfField: (shotData.depthOfField as string) || "medium",
+        soundDesign: (shotData.soundDesign as string) || "",
+        musicCue: (shotData.musicCue as string) || "",
         episodeId: payload.episodeId ?? null,
         sceneId: sceneId ?? null,
       })

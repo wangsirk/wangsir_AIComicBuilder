@@ -1,0 +1,2 @@
+ALTER TABLE projects ADD COLUMN target_duration INTEGER DEFAULT 0;
+ALTER TABLE episodes ADD COLUMN target_duration INTEGER DEFAULT 0;

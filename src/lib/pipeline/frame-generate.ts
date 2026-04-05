@@ -69,6 +69,14 @@ export async function handleFrameGenerate(task: Task) {
   if (shot.compositionGuide) {
     compositionSuffix += `, ${shot.compositionGuide.replace(/_/g, " ")} composition`;
   }
+  if (shot.focalPoint) {
+    compositionSuffix += `, focus on ${shot.focalPoint}`;
+  }
+  if (shot.depthOfField === "shallow") {
+    compositionSuffix += `, shallow depth of field, bokeh background`;
+  } else if (shot.depthOfField === "deep") {
+    compositionSuffix += `, deep focus, everything sharp`;
+  }
   if (colorPalette) {
     compositionSuffix += `\n\nGLOBAL COLOR PALETTE (mandatory): ${colorPalette}. All frames must adhere to this color scheme.`;
   }

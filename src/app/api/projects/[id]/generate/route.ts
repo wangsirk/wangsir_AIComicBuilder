@@ -290,13 +290,20 @@ async function handleScriptGenerate(
     ? `\n\n【Story Outline - follow this structure strictly】\n${outline}\n\n`
     : "";
 
+  // Fetch world setting from project
+  let worldSettingContext = "";
+  const [projForWorld] = await db.select({ worldSetting: projects.worldSetting }).from(projects).where(eq(projects.id, projectId));
+  if (projForWorld?.worldSetting) {
+    worldSettingContext = `\n\n【World Setting】\n${projForWorld.worldSetting}\n\nThe script must be consistent with this world setting.\n\n`;
+  }
+
   const model = createLanguageModel(modelConfig.text);
   const scriptGenerateSystem = await resolvePrompt("script_generate", { userId, projectId });
 
   const result = streamText({
     model,
     system: scriptGenerateSystem,
-    prompt: outlineContext + buildScriptGeneratePrompt(idea),
+    prompt: worldSettingContext + outlineContext + buildScriptGeneratePrompt(idea),
     temperature: 0.8,
     onFinish: async ({ text }) => {
       try {
@@ -657,6 +664,14 @@ async function handleShotSplitStream(
     .filter((c) => c.visualHint)
     .map((c) => ({ name: c.name, visualHint: c.visualHint! }));
 
+  // Fetch world setting and target duration from project
+  const [projData] = await db.select({ worldSetting: projects.worldSetting, targetDuration: projects.targetDuration }).from(projects).where(eq(projects.id, projectId));
+  let targetDuration = projData?.targetDuration || 0;
+  if (episodeId) {
+    const [epDur] = await db.select({ targetDuration: episodes.targetDuration }).from(episodes).where(eq(episodes.id, episodeId));
+    if (epDur?.targetDuration && epDur.targetDuration > 0) targetDuration = epDur.targetDuration;
+  }
+
   const model = createLanguageModel(modelConfig.text);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const shotSplitSlots = await resolveSlotContents("shot_split", { userId, projectId });
@@ -686,12 +701,26 @@ async function handleShotSplitStream(
     duration: number;
     dialogues: Array<{ character: string; text: string }>;
     cameraDirection?: string;
+    focalPoint?: string;
+    depthOfField?: string;
+    soundDesign?: string;
+    musicCue?: string;
   };
 
   // Process chunks concurrently
   const chunkResults = await Promise.all(
     sceneChunks.map(async (chunk, idx) => {
-      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints);
+      let prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints);
+
+      // Inject world setting
+      if (projData?.worldSetting) {
+        prompt = `【World Setting】\n${projData.worldSetting}\n\nAll shots must be consistent with this world setting.\n\n` + prompt;
+      }
+
+      // Inject target duration
+      if (targetDuration && targetDuration > 0) {
+        prompt += `\n\nTarget total duration: ${targetDuration} seconds (${Math.floor(targetDuration / 60)}m${targetDuration % 60}s). Ensure all shot durations sum to approximately this target.\n`;
+      }
       try {
         const result = await generateText({
           model,
@@ -759,6 +788,10 @@ async function handleShotSplitStream(
       videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration,
+      focalPoint: shot.focalPoint || "",
+      depthOfField: shot.depthOfField || "medium",
+      soundDesign: shot.soundDesign || "",
+      musicCue: shot.musicCue || "",
       episodeId: episodeId ?? null,
     });
 

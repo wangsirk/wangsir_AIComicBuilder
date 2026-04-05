@@ -166,9 +166,10 @@ export async function PATCH(
     outline: string;
     status: "draft" | "processing" | "completed";
     generationMode: "keyframe" | "reference";
+    targetDuration: number;
   }>;
 
-  const { title, description, keywords, idea, script, outline, status, generationMode } = body;
+  const { title, description, keywords, idea, script, outline, status, generationMode, targetDuration } = body;
 
   const [updated] = await db
     .update(episodes)
@@ -181,6 +182,7 @@ export async function PATCH(
       ...(outline !== undefined && { outline }),
       ...(status !== undefined && { status }),
       ...(generationMode !== undefined && { generationMode }),
+      ...(targetDuration !== undefined && { targetDuration }),
       updatedAt: new Date(),
     })
     .where(eq(episodes.id, episodeId))

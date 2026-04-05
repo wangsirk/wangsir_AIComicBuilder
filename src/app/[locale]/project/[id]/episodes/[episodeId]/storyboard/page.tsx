@@ -960,6 +960,10 @@ export default function EpisodeStoryboardPage() {
               transitionIn={shot.transitionIn}
               transitionOut={shot.transitionOut}
               compositionGuide={shot.compositionGuide}
+              focalPoint={shot.focalPoint}
+              depthOfField={shot.depthOfField}
+              soundDesign={shot.soundDesign}
+              musicCue={shot.musicCue}
               videoUrl={generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl}
               status={
                 generationMode === "reference"

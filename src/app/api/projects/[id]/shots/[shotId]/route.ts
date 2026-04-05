@@ -20,6 +20,10 @@ export async function PATCH(
     lastFrame: string | null;
     sceneRefFrame: string | null;
     videoPrompt: string | null;
+    focalPoint: string;
+    depthOfField: string;
+    soundDesign: string;
+    musicCue: string;
   }>;
 
   const [updated] = await db
