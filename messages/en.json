@@ -269,6 +269,8 @@
       "video": "Video"
     },
     "prompts": {
+      "scriptOutline": "Story Outline",
+      "scriptOutlineDesc": "Prompt for generating story outline from creative concept",
       "scriptGenerate": "Script Generation",
       "scriptParse": "Script Parsing",
       "scriptSplit": "Script Splitting",

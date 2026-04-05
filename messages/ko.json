@@ -269,6 +269,8 @@
       "video": "영상"
     },
     "prompts": {
+      "scriptOutline": "스토리 개요 생성",
+      "scriptOutlineDesc": "창작 아이디어로부터 스토리 개요를 생성하는 프롬프트",
       "scriptGenerate": "각본 생성",
       "scriptParse": "각본 분석",
       "scriptSplit": "각본 분할",

@@ -270,6 +270,8 @@
       "video": "视频"
     },
     "prompts": {
+      "scriptOutline": "故事大纲生成",
+      "scriptOutlineDesc": "根据创意构想生成故事大纲的提示词",
       "scriptGenerate": "剧本生成",
       "scriptParse": "剧本解析",
       "scriptSplit": "剧本分集",

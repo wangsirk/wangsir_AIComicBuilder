@@ -1227,9 +1227,56 @@ const refVideoPromptDef: PromptDefinition = {
   },
 };
 
+// ─── 14. script_outline ──────────────────────────────────
+
+const SCRIPT_OUTLINE_ROLE = `你是一位屡获殊荣的编剧。根据用户的创意构想，生成一份简洁的故事大纲。`;
+
+const SCRIPT_OUTLINE_FORMAT = `输出格式——纯文本时间轴，不要JSON，不要markdown：
+
+前提：（一句话核心冲突）
+
+1. [节拍名] (占比XX%)
+   事件：……
+   情感：……
+
+2. [节拍名] (占比XX%)
+   事件：……
+   情感：……
+
+3. [节拍名] (占比XX%)
+   事件：……
+   情感：……
+
+高潮：……
+结局：……`;
+
+const SCRIPT_OUTLINE_RULES = `要求：
+- 3-5个关键节拍，每个包含事件和情感转变
+- 占比之和应为100%
+- 语言规则：使用与用户输入相同的语言（中文输入→中文输出，英文输入→英文输出）
+- 直接输出内容，不要任何包裹或标记`;
+
+const scriptOutlineDef: PromptDefinition = {
+  key: "script_outline",
+  nameKey: "promptTemplates.prompts.scriptOutline",
+  descriptionKey: "promptTemplates.prompts.scriptOutlineDesc",
+  category: "script",
+  slots: [
+    slot("role_definition", SCRIPT_OUTLINE_ROLE, true),
+    slot("output_format", SCRIPT_OUTLINE_FORMAT, true),
+    slot("writing_rules", SCRIPT_OUTLINE_RULES, true),
+  ],
+  buildFullPrompt(sc) {
+    const s = this.slots;
+    const r = (k: string) => resolve(sc, s, k);
+    return [r("role_definition"), "", r("output_format"), "", r("writing_rules")].join("\n");
+  },
+};
+
 // ── Registry ─────────────────────────────────────────────
 
 export const PROMPT_REGISTRY: PromptDefinition[] = [
+  scriptOutlineDef,
   scriptGenerateDef,
   scriptParseDef,
   scriptSplitDef,

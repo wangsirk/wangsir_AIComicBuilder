@@ -93,6 +93,8 @@ export function ScriptEditor() {
     if (!project) return;
     if (!textGuard()) return;
     setGeneratingOutline(true);
+    setOutline("");
+
     try {
       const currentEpisodeId = useProjectStore.getState().currentEpisodeId;
       const resp = await apiFetch(`/api/projects/${project.id}/generate`, {
@@ -106,23 +108,27 @@ export function ScriptEditor() {
         }),
       });
       if (!resp.ok) throw new Error("Failed to generate outline");
-      const data = await resp.json();
-      if (data.id) {
-        // Poll for task completion
-        let attempts = 0;
-        while (attempts < 60) {
-          await new Promise((r) => setTimeout(r, 2000));
-          const taskResp = await apiFetch(`/api/tasks/${data.id}`);
-          const taskData = await taskResp.json();
-          if (taskData.status === "completed") {
-            await fetchProject(project.id, currentEpisodeId ?? undefined);
-            break;
-          }
-          if (taskData.status === "failed") throw new Error(taskData.error || "Outline generation failed");
-          attempts++;
+
+      // Stream response
+      if (resp.body) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          fullText += decoder.decode(value, { stream: true });
+          setOutline(fullText);
         }
+
+        // Update store so it persists
+        useProjectStore.setState((state) => ({
+          project: state.project ? { ...state.project, outline: fullText } : null,
+        }));
       }
-      toast.success(t("common.generationCompleted"));
+
+      await fetchProject(project.id, currentEpisodeId ?? undefined);
     } catch (err) {
       console.error("Outline generate error:", err);
       toast.error(t("common.generationFailed"));
@@ -150,7 +156,7 @@ export function ScriptEditor() {
     let currentOutline = outline;
 
     try {
-      // Step 1: Auto-generate outline if empty
+      // Step 1: Auto-generate outline if empty (streaming)
       if (!currentOutline.trim()) {
         setGeneratingOutline(true);
         toast.info(t("project.generatingOutlineFirst") || "Generating outline first...");
@@ -166,30 +172,22 @@ export function ScriptEditor() {
           }),
         });
 
-        if (outlineResp.ok) {
-          const data = await outlineResp.json();
-          if (data.id) {
-            // Poll for outline task completion
-            let attempts = 0;
-            while (attempts < 60) {
-              await new Promise((r) => setTimeout(r, 2000));
-              const taskResp = await apiFetch(`/api/tasks/${data.id}`);
-              const taskData = await taskResp.json();
-              if (taskData.status === "completed") {
-                // Refresh project to get the generated outline
-                await fetchProject(project.id, currentEpisodeId ?? undefined);
-                const updatedProject = useProjectStore.getState().project;
-                currentOutline = updatedProject?.outline || "";
-                setOutline(currentOutline);
-                break;
-              }
-              if (taskData.status === "failed") {
-                console.warn("Outline generation failed, proceeding without outline");
-                break;
-              }
-              attempts++;
-            }
+        if (outlineResp.ok && outlineResp.body) {
+          const reader = outlineResp.body.getReader();
+          const decoder = new TextDecoder();
+          let fullOutline = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            fullOutline += decoder.decode(value, { stream: true });
+            setOutline(fullOutline);
           }
+
+          currentOutline = fullOutline;
+          useProjectStore.setState((state) => ({
+            project: state.project ? { ...state.project, outline: fullOutline } : null,
+          }));
         }
         setGeneratingOutline(false);
       }

@@ -211,7 +211,7 @@ export async function POST(
   return NextResponse.json(task, { status: 201 });
 }
 
-// --- script_outline: enqueue outline generation task ---
+// --- script_outline: stream plain text outline from an idea ---
 
 async function handleScriptOutlineAction(
   projectId: string,
@@ -232,14 +232,36 @@ async function handleScriptOutlineAction(
     );
   }
 
-  const task = await enqueueTask({
-    type: "script_outline",
-    projectId,
-    payload: { projectId, idea, modelConfig, episodeId, userId },
-    ...(episodeId ? { episodeId } : {}),
+  const model = createLanguageModel(modelConfig.text);
+  const outlineSystem = await resolvePrompt("script_outline", { userId, projectId });
+
+  const result = streamText({
+    model,
+    system: outlineSystem,
+    prompt: `创意构想：${idea}`,
+    temperature: 0.7,
+    onFinish: async ({ text }) => {
+      try {
+        const outline = text.trim();
+        if (episodeId) {
+          await db
+            .update(episodes)
+            .set({ outline, updatedAt: new Date() })
+            .where(eq(episodes.id, episodeId));
+        } else {
+          await db
+            .update(projects)
+            .set({ outline, updatedAt: new Date() })
+            .where(eq(projects.id, projectId));
+        }
+        console.log(`[ScriptOutline] Saved outline for ${episodeId || projectId}`);
+      } catch (err) {
+        console.error("[ScriptOutline] onFinish error:", err);
+      }
+    },
   });
 
-  return NextResponse.json(task, { status: 201 });
+  return result.toTextStreamResponse();
 }
 
 // --- script_generate: stream plain text screenplay from an idea ---

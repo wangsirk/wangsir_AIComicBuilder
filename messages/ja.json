@@ -269,6 +269,8 @@
       "video": "動画"
     },
     "prompts": {
+      "scriptOutline": "ストーリー概要生成",
+      "scriptOutlineDesc": "クリエイティブコンセプトからストーリー概要を生成するプロンプト",
       "scriptGenerate": "脚本生成",
       "scriptParse": "脚本解析",
       "scriptSplit": "脚本分割",
