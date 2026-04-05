@@ -276,14 +276,16 @@ async function handleScriptGenerate(
       .where(eq(projects.id, projectId));
   }
 
-  // Fetch outline if available to inject into the prompt
-  let outline = "";
-  if (episodeId) {
-    const [ep] = await db.select({ outline: episodes.outline }).from(episodes).where(eq(episodes.id, episodeId));
-    outline = ep?.outline || "";
-  } else {
-    const [proj] = await db.select({ outline: projects.outline }).from(projects).where(eq(projects.id, projectId));
-    outline = proj?.outline || "";
+  // Use outline from payload (latest from UI) or fallback to DB
+  let outline = (payload?.outline as string) || "";
+  if (!outline) {
+    if (episodeId) {
+      const [ep] = await db.select({ outline: episodes.outline }).from(episodes).where(eq(episodes.id, episodeId));
+      outline = ep?.outline || "";
+    } else {
+      const [proj] = await db.select({ outline: projects.outline }).from(projects).where(eq(projects.id, projectId));
+      outline = proj?.outline || "";
+    }
   }
 
   const outlineContext = outline

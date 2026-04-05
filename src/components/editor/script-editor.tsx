@@ -154,7 +154,7 @@ export function ScriptEditor() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "script_generate",
-          payload: { idea },
+          payload: { idea, outline: outline || undefined },
           modelConfig: getModelConfig(),
           episodeId: useProjectStore.getState().currentEpisodeId,
         }),
