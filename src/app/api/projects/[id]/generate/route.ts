@@ -1785,36 +1785,57 @@ async function handleBatchSceneFrame(
         referenceImages: charRefs.map((c) => c.imagePath),
       });
 
-      // Auto-generate reference images from AI-provided prompts
+      // Auto-generate reference images
       const refImagesRaw: string[] = shot.referenceImages ? JSON.parse(shot.referenceImages as string) : [];
       const promptEntries = refImagesRaw.filter((r) => r.startsWith("prompt:"));
       const existingImages = refImagesRaw.filter((r) => !r.startsWith("prompt:"));
 
-      if (promptEntries.length > 0) {
-        const generatedRefs = [...existingImages];
-        for (const entry of promptEntries) {
-          const refPrompt = entry.replace(/^prompt:/, "");
-          try {
-            const refPath = await imageProvider.generateImage(refPrompt, {
-              quality: "hd",
-              referenceImages: charRefs.map((c) => c.imagePath),
-            });
-            generatedRefs.push(refPath);
-            console.log(`[BatchSceneFrame] Shot ${shot.sequence}: generated ref image from prompt`);
-          } catch (refErr) {
-            console.warn(`[BatchSceneFrame] Shot ${shot.sequence}: ref image generation failed, skipping:`, refErr);
-          }
+      // Build reference image prompts: use AI-provided if available, otherwise auto-generate from scene
+      let refPrompts: string[] = promptEntries.map((e) => e.replace(/^prompt:/, ""));
+
+      if (refPrompts.length === 0 && existingImages.length === 0) {
+        // Auto-generate prompts based on characters in this shot and scene description
+        const shotChars = projectCharacters.filter(
+          (c) => shot.prompt?.includes(c.name) || shot.startFrameDesc?.includes(c.name)
+        );
+
+        // Generate character close-up references for each character in the shot
+        for (const char of shotChars.slice(0, 3)) {
+          refPrompts.push(
+            `${char.description?.substring(0, 200) || char.name}, portrait close-up, looking at camera, neutral background, high detail`
+          );
         }
-        await db
-          .update(shots)
-          .set({ sceneRefFrame: sceneFramePath, referenceImages: JSON.stringify(generatedRefs), status: "pending" })
-          .where(eq(shots.id, shot.id));
-      } else {
-        await db
-          .update(shots)
-          .set({ sceneRefFrame: sceneFramePath, status: "pending" })
-          .where(eq(shots.id, shot.id));
+
+        // If no characters detected but has scene description, generate an environment reference
+        if (refPrompts.length === 0 && shot.prompt) {
+          refPrompts.push(
+            `${shot.prompt.substring(0, 200)}, establishing shot, wide angle, high detail`
+          );
+        }
       }
+
+      const generatedRefs = [...existingImages];
+      for (const refPrompt of refPrompts) {
+        try {
+          const refPath = await imageProvider.generateImage(refPrompt, {
+            quality: "hd",
+            referenceImages: charRefs.map((c) => c.imagePath),
+          });
+          generatedRefs.push(refPath);
+          console.log(`[BatchSceneFrame] Shot ${shot.sequence}: generated ref image`);
+        } catch (refErr) {
+          console.warn(`[BatchSceneFrame] Shot ${shot.sequence}: ref image failed, skipping:`, refErr);
+        }
+      }
+
+      await db
+        .update(shots)
+        .set({
+          sceneRefFrame: sceneFramePath,
+          ...(generatedRefs.length > 0 ? { referenceImages: JSON.stringify(generatedRefs) } : {}),
+          status: "pending",
+        })
+        .where(eq(shots.id, shot.id));
 
       results.push({ shotId: shot.id, sequence: shot.sequence, status: "ok", sceneRefFrame: sceneFramePath });
     } catch (err) {
