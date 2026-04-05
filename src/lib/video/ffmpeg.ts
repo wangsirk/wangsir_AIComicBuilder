@@ -1,7 +1,7 @@
 import ffmpeg from "fluent-ffmpeg";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -42,7 +42,7 @@ export async function generateTitleCard(
   options?: { fontSize?: number; bgColor?: string; textColor?: string }
 ): Promise<string> {
   const { fontSize = 48, bgColor = "black", textColor = "white" } = options || {};
-  const cardPath = path.resolve(outputDir, `title-${ulid()}.mp4`);
+  const cardPath = path.resolve(outputDir, `title-${genId()}.mp4`);
 
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
@@ -267,8 +267,8 @@ export async function assembleVideo(params: AssembleParams): Promise<AssembleRes
   const transitions: TransitionType[] = params.transitions
     ?? new Array(Math.max(allPaths.length - 1, 0)).fill("cut");
 
-  const concatOutputPath = path.resolve(outputDir, `${projectId}-concat-${ulid()}.mp4`);
-  const outputPath = path.resolve(outputDir, `${projectId}-final-${ulid()}.mp4`);
+  const concatOutputPath = path.resolve(outputDir, `${projectId}-concat-${genId()}.mp4`);
+  const outputPath = path.resolve(outputDir, `${projectId}-final-${genId()}.mp4`);
 
   // Step 1: Concatenate video clips (with transitions)
   await concatWithTransitions(allPaths, transitions, allDurations, concatOutputPath, projectId, outputDir);

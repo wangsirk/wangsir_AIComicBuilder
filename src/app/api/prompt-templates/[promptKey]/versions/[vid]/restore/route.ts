@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promptTemplates, promptVersions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
 // POST: Restore a specific version
@@ -43,7 +43,7 @@ export async function POST(
 
   // Save current content as a new version (for undo)
   await db.insert(promptVersions).values({
-    id: ulid(),
+    id: genId(),
     templateId: template.id,
     content: template.content,
   });

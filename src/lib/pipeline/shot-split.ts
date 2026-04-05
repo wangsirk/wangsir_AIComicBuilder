@@ -5,7 +5,7 @@ import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 import { eq, and, or, isNull } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import type { Task } from "@/lib/task-queue";
 
 export async function handleShotSplit(task: Task) {
@@ -102,7 +102,7 @@ export async function handleShotSplit(task: Task) {
     shotData: Record<string, unknown>,
     sceneId?: string
   ) => {
-    const shotId = ulid();
+    const shotId = genId();
     const [record] = await db
       .insert(shots)
       .values({
@@ -137,7 +137,7 @@ export async function handleShotSplit(task: Task) {
       );
       if (matchedChar) {
         await db.insert(dialogues).values({
-          id: ulid(),
+          id: genId(),
           shotId,
           characterId: matchedChar.id,
           text: dialogue.text,
@@ -153,7 +153,7 @@ export async function handleShotSplit(task: Task) {
     let globalSequence = 1;
     for (let sceneIdx = 0; sceneIdx < parsed.length; sceneIdx++) {
       const scene = parsed[sceneIdx] as Record<string, unknown>;
-      const sceneId = ulid();
+      const sceneId = genId();
       await db.insert(scenes).values({
         id: sceneId,
         episodeId: payload.episodeId || "",

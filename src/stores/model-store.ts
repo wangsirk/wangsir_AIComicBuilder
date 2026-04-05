@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 export type Protocol = "openai" | "gemini" | "seedance" | "kling";
 export type Capability = "text" | "image" | "video";
@@ -61,7 +61,7 @@ export const useModelStore = create<ModelStore>()(
       defaultVideoModel: null,
 
       addProvider: (provider) => {
-        const id = ulid();
+        const id = genId();
         set((state) => ({
           providers: [...state.providers, { ...provider, id, models: [] }],
         }));

@@ -7,7 +7,7 @@ import { projects, episodes, characters, shots, dialogues, storyboardVersions, e
 import { eq, asc, and, lt, gt, desc, or, isNull, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import path from "path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { enqueueTask } from "@/lib/task-queue";
 import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
@@ -472,7 +472,7 @@ async function handleCharacterExtract(
       reusedCount++;
     } else {
       // Create new character
-      const charId = ulid();
+      const charId = genId();
       const scope = char.scope === "guest" ? "guest" : "main";
       await db.insert(characters).values({
         id: charId,
@@ -493,7 +493,7 @@ async function handleCharacterExtract(
   if (episodeId) {
     for (const charId of linkedCharIds) {
       await db.insert(episodeCharacters).values({
-        id: ulid(),
+        id: genId(),
         episodeId,
         characterId: charId,
       });
@@ -768,7 +768,7 @@ async function handleShotSplitStream(
     String(today.getUTCMonth() + 1).padStart(2, "0") +
     String(today.getUTCDate()).padStart(2, "0");
   const versionLabel = `${dateStr}-V${nextVersionNum}`;
-  const versionId = ulid();
+  const versionId = genId();
   await db.insert(storyboardVersions).values({
     id: versionId,
     projectId,
@@ -779,7 +779,7 @@ async function handleShotSplitStream(
   });
 
   for (const shot of allShots) {
-    const shotId = ulid();
+    const shotId = genId();
     await db.insert(shots).values({
       id: shotId,
       projectId,
@@ -806,7 +806,7 @@ async function handleShotSplitStream(
       );
       if (matchedChar) {
         await db.insert(dialogues).values({
-          id: ulid(),
+          id: genId(),
           shotId,
           characterId: matchedChar.id,
           text: dialogue.text,
@@ -1028,11 +1028,11 @@ async function handleBatchFrameGenerate(
         // 4. Copy the file
         const fs = await import("node:fs");
         const path = await import("node:path");
-        const { ulid: genId } = await import("ulid");
+        const { id: _genId } = await import("@/lib/id");
         const ext = path.extname(lastShot.lastFrame);
         const destDir = path.resolve(versionedUploadDir, "frames");
         fs.mkdirSync(destDir, { recursive: true });
-        const destPath = path.join(destDir, `${genId()}${ext}`);
+        const destPath = path.join(destDir, `${_genId()}${ext}`);
         fs.copyFileSync(path.resolve(lastShot.lastFrame), destPath);
         const relativeDest = path.relative(process.cwd(), destPath);
 

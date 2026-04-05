@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 const VALID_DURATIONS = [4, 6, 8] as const;
 
@@ -160,7 +160,7 @@ export class VeoProvider implements VideoProvider {
 
     const dir = path.join(this.uploadDir, "videos");
     fs.mkdirSync(dir, { recursive: true });
-    const downloadPath = path.join(dir, `${ulid()}.mp4`);
+    const downloadPath = path.join(dir, `${genId()}.mp4`);
 
     await this.client.files.download({ file: videoFile, downloadPath });
 

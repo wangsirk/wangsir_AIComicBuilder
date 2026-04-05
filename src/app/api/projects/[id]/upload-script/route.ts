@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { projects, episodes } from "@/lib/db/schema";
 import { eq, and, max } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { buildScriptSplitPrompt } from "@/lib/ai/prompts/script-split";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 
@@ -194,7 +194,7 @@ export async function POST(
     const [row] = await db
       .insert(episodes)
       .values({
-        id: ulid(),
+        id: genId(),
         projectId,
         title: ep.title,
         description: ep.description || "",

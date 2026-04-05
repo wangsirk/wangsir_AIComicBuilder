@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promptTemplates, promptVersions } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
 // PUT: save global override (slots mode or full mode)
@@ -46,7 +46,7 @@ export async function PUT(
       if (existing) {
         // Save current content as a version before updating
         await db.insert(promptVersions).values({
-          id: ulid(),
+          id: genId(),
           templateId: existing.id,
           content: existing.content,
         });
@@ -63,7 +63,7 @@ export async function PUT(
         const [inserted] = await db
           .insert(promptTemplates)
           .values({
-            id: ulid(),
+            id: genId(),
             userId,
             promptKey,
             slotKey,
@@ -104,7 +104,7 @@ export async function PUT(
     if (existing) {
       // Save current content as a version before updating
       await db.insert(promptVersions).values({
-        id: ulid(),
+        id: genId(),
         templateId: existing.id,
         content: existing.content,
       });
@@ -120,7 +120,7 @@ export async function PUT(
       const [inserted] = await db
         .insert(promptTemplates)
         .values({
-          id: ulid(),
+          id: genId(),
           userId,
           promptKey,
           slotKey: null,

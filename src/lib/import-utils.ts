@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { importLogs } from "@/lib/db/schema";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 export async function addImportLog(
   projectId: string,
@@ -10,7 +10,7 @@ export async function addImportLog(
   metadata?: unknown
 ) {
   await db.insert(importLogs).values({
-    id: ulid(),
+    id: genId(),
     projectId,
     step,
     status,

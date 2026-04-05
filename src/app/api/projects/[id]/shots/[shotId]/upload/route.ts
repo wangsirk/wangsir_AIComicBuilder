@@ -4,7 +4,7 @@ import { shots } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -29,7 +29,7 @@ export async function POST(
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = file.name.split(".").pop() || "png";
-  const filename = `${ulid()}.${ext}`;
+  const filename = `${genId()}.${ext}`;
   const dir = path.join(uploadDir, "frames");
   fs.mkdirSync(dir, { recursive: true });
   const filepath = path.join(dir, filename);

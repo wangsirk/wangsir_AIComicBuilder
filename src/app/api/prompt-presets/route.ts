@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promptPresets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { BUILT_IN_PRESETS } from "@/lib/ai/prompts/presets";
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const [inserted] = await db
     .insert(promptPresets)
     .values({
-      id: ulid(),
+      id: genId(),
       name: body.name,
       userId,
       promptKey: body.promptKey,

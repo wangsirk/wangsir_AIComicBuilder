@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promptTemplates, promptVersions, promptPresets } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { BUILT_IN_PRESETS, type BuiltInPreset } from "@/lib/ai/prompts/presets";
 
@@ -81,7 +81,7 @@ export async function POST(
     if (existing) {
       // Save version history before update
       await db.insert(promptVersions).values({
-        id: ulid(),
+        id: genId(),
         templateId: existing.id,
         content: existing.content,
       });
@@ -99,7 +99,7 @@ export async function POST(
       const [inserted] = await db
         .insert(promptTemplates)
         .values({
-          id: ulid(),
+          id: genId(),
           userId,
           promptKey: presetPromptKey,
           slotKey,

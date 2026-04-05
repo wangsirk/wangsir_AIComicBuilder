@@ -2,7 +2,7 @@ import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "..
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 function generateKlingToken(accessKey: string, secretKey: string): string {
   const now = Math.floor(Date.now() / 1000);
@@ -196,7 +196,7 @@ export class KlingVideoProvider implements VideoProvider {
     // Download video
     const videoRes = await fetch(videoUrl);
     const buffer = Buffer.from(await videoRes.arrayBuffer());
-    const filename = `${ulid()}.mp4`;
+    const filename = `${genId()}.mp4`;
     const dir = path.join(this.uploadDir, "videos");
     fs.mkdirSync(dir, { recursive: true });
     const filepath = path.join(dir, filename);

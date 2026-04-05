@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects, episodes, shots, characters, episodeCharacters } from "@/lib/db/schema";
 import { eq, asc, and, max, isNotNull, inArray } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
 async function resolveProject(id: string, userId: string) {
@@ -113,7 +113,7 @@ export async function POST(
   const [episode] = await db
     .insert(episodes)
     .values({
-      id: ulid(),
+      id: genId(),
       projectId: id,
       title: body.title,
       description: body.description || "",

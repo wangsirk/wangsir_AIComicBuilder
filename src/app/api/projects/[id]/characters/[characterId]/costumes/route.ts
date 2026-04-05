@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { characterCostumes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { NextResponse } from "next/server";
 
 export async function GET(
@@ -23,7 +23,7 @@ export async function POST(
   const { characterId } = await params;
   const body = await req.json();
   const costume = {
-    id: ulid(),
+    id: genId(),
     characterId,
     name: body.name || "default",
     description: body.description || "",

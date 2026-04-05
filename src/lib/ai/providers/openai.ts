@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import type { AIProvider, TextOptions, ImageOptions } from "../types";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 export class OpenAIProvider implements AIProvider {
   private client: OpenAI;
@@ -83,7 +83,7 @@ export class OpenAIProvider implements AIProvider {
 
     const imageResponse = await fetch(imageUrl);
     const buffer = Buffer.from(await imageResponse.arrayBuffer());
-    const filename = `${ulid()}.png`;
+    const filename = `${genId()}.png`;
     const dir = path.join(this.uploadDir, "frames");
     fs.mkdirSync(dir, { recursive: true });
     const filepath = path.join(dir, filename);

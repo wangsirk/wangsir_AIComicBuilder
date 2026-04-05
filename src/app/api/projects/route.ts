@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
 export async function GET(request: Request) {
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const userId = getUserIdFromRequest(request);
   const body = (await request.json()) as { title: string; script?: string };
-  const id = ulid();
+  const id = genId();
 
   const [project] = await db
     .insert(projects)

@@ -5,7 +5,7 @@ import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildCharacterExtractPrompt } from "@/lib/ai/prompts/character-extract";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 import { and, eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import type { Task } from "@/lib/task-queue";
 
 interface ExtractedChar {
@@ -88,7 +88,7 @@ export async function handleCharacterExtract(task: Task) {
   const scope = payload.episodeId ? "guest" : "main";
   const created = [];
   for (const char of newCharacters) {
-    const id = ulid();
+    const id = genId();
     const [record] = await db
       .insert(characters)
       .values({
@@ -122,7 +122,7 @@ export async function handleCharacterExtract(task: Task) {
       if (aId && bId && aId !== bId) {
         try {
           await db.insert(characterRelations).values({
-            id: ulid(),
+            id: genId(),
             projectId: payload.projectId,
             characterAId: aId,
             characterBId: bId,

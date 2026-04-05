@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { AIProvider, TextOptions, ImageOptions } from "../types";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 
 export class GeminiProvider implements AIProvider {
   private client: GoogleGenAI;
@@ -115,7 +115,7 @@ CRITICAL CHARACTER CONSISTENCY RULES:
       if (part.inlineData?.data) {
         const buffer = Buffer.from(part.inlineData.data, "base64");
         const ext = part.inlineData.mimeType?.includes("png") ? "png" : "jpg";
-        const filename = `${ulid()}.${ext}`;
+        const filename = `${genId()}.${ext}`;
         const dir = path.join(this.uploadDir, "frames");
         fs.mkdirSync(dir, { recursive: true });
         const filepath = path.join(dir, filename);

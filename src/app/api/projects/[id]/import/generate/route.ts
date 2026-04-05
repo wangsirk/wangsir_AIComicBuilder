@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects, episodes, characters, episodeCharacters } from "@/lib/db/schema";
 import { eq, and, max } from "drizzle-orm";
-import { ulid } from "ulid";
+import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { addImportLog } from "@/lib/import-utils";
 
@@ -52,7 +52,7 @@ export async function POST(
   // 1. Create all characters (main + guest), build name→id map
   const charIdByName = new Map<string, string>();
   for (const char of body.characters) {
-    const charId = ulid();
+    const charId = genId();
     await db.insert(characters).values({
       id: charId,
       projectId,
@@ -83,7 +83,7 @@ export async function POST(
     const [row] = await db
       .insert(episodes)
       .values({
-        id: ulid(),
+        id: genId(),
         projectId,
         title: ep.title,
         description: ep.description || "",
@@ -106,7 +106,7 @@ export async function POST(
       const charId = charIdByName.get(charName.toLowerCase().trim());
       if (!charId) continue;
       await db.insert(episodeCharacters).values({
-        id: ulid(),
+        id: genId(),
         episodeId,
         characterId: charId,
       });
