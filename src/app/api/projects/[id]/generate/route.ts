@@ -3,7 +3,7 @@ import { streamText, generateText } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters } from "@/lib/db/schema";
+import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterRelations } from "@/lib/db/schema";
 import { eq, asc, and, lt, gt, desc, or, isNull, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import path from "path";
@@ -467,12 +467,24 @@ async function handleCharacterExtract(
     prompt: buildCharacterExtractPrompt(script),
   });
 
-  const extracted = JSON.parse(extractJSON(text)) as Array<{
+  const parsed = JSON.parse(extractJSON(text));
+
+  // Support both formats: new { characters, relationships } and legacy array
+  const extracted: Array<{
     name: string;
     description: string;
     visualHint?: string;
     scope?: string;
-  }>;
+    heightCm?: number;
+    bodyType?: string;
+    performanceStyle?: string;
+  }> = Array.isArray(parsed) ? parsed : (parsed.characters || []);
+  const extractedRelations: Array<{
+    characterA: string;
+    characterB: string;
+    relationType: string;
+    description?: string;
+  }> = Array.isArray(parsed) ? [] : (parsed.relationships || []);
 
   let reusedCount = 0;
   let createdCount = 0;
@@ -504,6 +516,9 @@ async function handleCharacterExtract(
         name: char.name,
         description: char.description,
         visualHint: char.visualHint ?? "",
+        heightCm: char.heightCm || 0,
+        bodyType: char.bodyType || "average",
+        performanceStyle: char.performanceStyle || "",
         scope,
         episodeId: null,
       });
@@ -524,8 +539,33 @@ async function handleCharacterExtract(
     }
   }
 
+  // Auto-create character relationships from extraction
+  if (extractedRelations.length > 0) {
+    const allChars = await db.select().from(characters).where(eq(characters.projectId, projectId));
+    const nameToId = new Map(allChars.map((c) => [c.name, c.id]));
+
+    for (const rel of extractedRelations) {
+      const aId = nameToId.get(rel.characterA);
+      const bId = nameToId.get(rel.characterB);
+      if (aId && bId && aId !== bId) {
+        try {
+          await db.insert(characterRelations).values({
+            id: genId(),
+            projectId,
+            characterAId: aId,
+            characterBId: bId,
+            relationType: rel.relationType || "neutral",
+            description: rel.description || "",
+          });
+        } catch {
+          // Skip duplicates
+        }
+      }
+    }
+  }
+
   console.log(
-    `[CharacterExtract] ${extracted.length} characters: ${reusedCount} reused, ${createdCount} new, ${linkedCharIds.length} linked to episode`
+    `[CharacterExtract] ${extracted.length} characters: ${reusedCount} reused, ${createdCount} new, ${linkedCharIds.length} linked to episode, ${extractedRelations.length} relations`
   );
 
   return NextResponse.json({ characters: extracted });
