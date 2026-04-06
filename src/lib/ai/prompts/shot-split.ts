@@ -55,14 +55,17 @@ Output a JSON array of SCENES. Each scene groups related shots that share the sa
   }
 ]
 
-=== referenceImagePrompts ===
-- Array of 0-4 image generation prompts for reference images this shot needs
-- Each prompt describes a specific reference image the AI video generator should use for consistency
-- Typical uses: character close-up for face consistency, key prop/object, specific environment/setting
-- If the shot only has one character in a simple setting, 1-2 reference images suffice
-- If the shot has multiple characters or complex props, use 2-4
-- Each prompt should be a complete image generation prompt (style, subject, details)
-- Leave empty array [] if no reference images needed (e.g., text-only shots)
+=== referenceImagePrompts (for reference generation mode) ===
+- Array of 1-4 image generation prompts describing reference images this shot needs
+- Each prompt is a COMPLETE image generation description that will be sent to an AI image generator
+- Think like a photographer preparing reference shots before filming:
+  * Character close-up: face, expression, costume details for consistency across frames
+  * Key prop/object: important items that must look consistent (weapons, artifacts, phones)
+  * Environment/setting: complex backgrounds that need visual anchoring
+  * Interaction: two characters together showing their spatial relationship
+- Each prompt MUST include the art style (matching the project's visual style)
+- Each prompt should be 30-80 words, descriptive and specific
+- Minimum 1 reference image per shot, maximum 4
 
 === compositionGuide ===
 - "compositionGuide": recommended composition technique for this shot. Values: "rule_of_thirds" | "golden_ratio" | "symmetric" | "diagonal" | "frame_within_frame" | "leading_lines" | "center_dominant". Choose based on scene mood and action.

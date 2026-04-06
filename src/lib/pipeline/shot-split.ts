@@ -125,7 +125,11 @@ export async function handleShotSplit(task: Task) {
         musicCue: (shotData.musicCue as string) || "",
         referenceImages: JSON.stringify(
           (Array.isArray(shotData.referenceImagePrompts) ? shotData.referenceImagePrompts : [])
-            .map((p: string) => `prompt:${p}`)
+            .map((p: string) => ({
+              id: genId(),
+              prompt: p,
+              status: "pending",
+            }))
         ),
         episodeId: payload.episodeId ?? null,
         sceneId: sceneId ?? null,
