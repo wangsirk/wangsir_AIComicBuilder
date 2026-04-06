@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, episodeCharacters } from "@/lib/db/schema";
+import { projects, episodes, characters, episodeCharacters, characterRelations } from "@/lib/db/schema";
 import { eq, and, max } from "drizzle-orm";
 import { id as genId } from "@/lib/id";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
@@ -42,6 +42,12 @@ export async function POST(
   const body = (await request.json()) as {
     episodes: EpisodeData[];
     characters: CharacterData[];
+    relationships?: Array<{
+      characterA: string;
+      characterB: string;
+      relationType: string;
+      description?: string;
+    }>;
   };
 
   await addImportLog(
@@ -65,9 +71,31 @@ export async function POST(
     charIdByName.set(char.name.toLowerCase().trim(), charId);
   }
 
+  // 1b. Create character relationships
+  if (body.relationships?.length) {
+    for (const rel of body.relationships) {
+      const aId = charIdByName.get(rel.characterA.toLowerCase().trim());
+      const bId = charIdByName.get(rel.characterB.toLowerCase().trim());
+      if (aId && bId && aId !== bId) {
+        try {
+          await db.insert(characterRelations).values({
+            id: genId(),
+            projectId,
+            characterAId: aId,
+            characterBId: bId,
+            relationType: rel.relationType || "neutral",
+            description: rel.description || "",
+          });
+        } catch {
+          // skip duplicates
+        }
+      }
+    }
+  }
+
   await addImportLog(
     projectId, 4, "running",
-    `已创建 ${body.characters.length} 个角色`
+    `已创建 ${body.characters.length} 个角色${body.relationships?.length ? `和 ${body.relationships.length} 个关系` : ""}`
   );
 
   // 2. Create episodes

@@ -19,6 +19,13 @@ interface ExtractedChar {
   visualHint?: string;
 }
 
+interface ExtractedRelation {
+  characterA: string;
+  characterB: string;
+  relationType: string;
+  description?: string;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -54,7 +61,7 @@ export async function POST(
   );
 
   // Concurrent extraction from all chunks
-  let chunkResults: ExtractedChar[][];
+  let chunkResults: Array<{ chars: ExtractedChar[]; rels: ExtractedRelation[] }>;
   try {
     chunkResults = await Promise.all(
       chunks.map(async (chunk, idx) => {
@@ -74,7 +81,10 @@ export async function POST(
         });
 
         try {
-          return JSON.parse(extractJSON(result.text)) as ExtractedChar[];
+          const parsed = JSON.parse(extractJSON(result.text));
+          // Support both { characters, relationships } and legacy array format
+          if (Array.isArray(parsed)) return { chars: parsed as ExtractedChar[], rels: [] as ExtractedRelation[] };
+          return { chars: (parsed.characters || []) as ExtractedChar[], rels: (parsed.relationships || []) as ExtractedRelation[] };
         } catch {
           console.error(`[ImportChars] Chunk ${idx + 1} JSON parse failed. Raw:\n${result.text.slice(0, 500)}...`);
           await addImportLog(
@@ -84,10 +94,12 @@ export async function POST(
           const retry = await generateText({
             model,
             system: importCharSystem,
-            prompt: buildImportCharacterExtractPrompt(chunk) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON array.",
+            prompt: buildImportCharacterExtractPrompt(chunk) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON.",
             providerOptions: jsonMode,
           });
-          return JSON.parse(extractJSON(retry.text)) as ExtractedChar[];
+          const parsed = JSON.parse(extractJSON(retry.text));
+          if (Array.isArray(parsed)) return { chars: parsed as ExtractedChar[], rels: [] as ExtractedRelation[] };
+          return { chars: (parsed.characters || []) as ExtractedChar[], rels: (parsed.relationships || []) as ExtractedRelation[] };
         }
       })
     );
@@ -97,15 +109,16 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // Merge & deduplicate by name, sum frequencies
+  // Merge & deduplicate characters by name, sum frequencies
   const charMap = new Map<string, ExtractedChar>();
-  for (const chars of chunkResults) {
+  const allRelations: ExtractedRelation[] = [];
+
+  for (const { chars, rels } of chunkResults) {
     for (const c of chars) {
       const key = c.name.toLowerCase().trim();
       const existing = charMap.get(key);
       if (existing) {
         existing.frequency += c.frequency;
-        // Keep longer description
         if (c.description.length > existing.description.length) {
           existing.description = c.description;
         }
@@ -113,6 +126,7 @@ export async function POST(
         charMap.set(key, { ...c });
       }
     }
+    allRelations.push(...rels);
   }
 
   const merged = [...charMap.values()].sort((a, b) => b.frequency - a.frequency);
@@ -123,11 +137,20 @@ export async function POST(
     scope: c.frequency >= 2 ? ("main" as const) : ("guest" as const),
   }));
 
+  // Deduplicate relationships
+  const relSet = new Set<string>();
+  const uniqueRelations = allRelations.filter((r) => {
+    const key = [r.characterA, r.characterB].sort().join("↔");
+    if (relSet.has(key)) return false;
+    relSet.add(key);
+    return true;
+  });
+
   await addImportLog(
     projectId, 2, "done",
-    `提取完成，共 ${result.length} 个角色（主角 ${result.filter((c) => c.scope === "main").length}，配角 ${result.filter((c) => c.scope === "guest").length}）`,
-    { characters: result }
+    `提取完成，共 ${result.length} 个角色（主角 ${result.filter((c) => c.scope === "main").length}，配角 ${result.filter((c) => c.scope === "guest").length}），${uniqueRelations.length} 个关系`,
+    { characters: result, relationships: uniqueRelations }
   );
 
-  return NextResponse.json({ characters: result });
+  return NextResponse.json({ characters: result, relationships: uniqueRelations });
 }

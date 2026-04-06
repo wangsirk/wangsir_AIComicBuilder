@@ -520,17 +520,27 @@ const IMPORT_CHAR_EXTRACTION_RULES = `规则：
 
 【关键语言规则】所有输出字段必须使用与原文相同的语言。`;
 
-const IMPORT_CHAR_OUTPUT_FORMAT = `输出格式——仅JSON数组，不要markdown代码块，不要评论：
-[
-  {
-    "name": "角色名，与文本中出现的一致",
-    "frequency": 5,
-    "description": "完整视觉规格——一段密集的段落，遵循以上所有要求",
-    "visualHint": "2-4个字的外貌标识符"
-  }
-]
+const IMPORT_CHAR_OUTPUT_FORMAT = `输出格式——仅JSON对象，不要markdown代码块，不要评论：
+{
+  "characters": [
+    {
+      "name": "角色名，与文本中出现的一致",
+      "frequency": 5,
+      "description": "完整视觉规格——一段密集的段落，遵循以上所有要求",
+      "visualHint": "2-4个字的外貌标识符"
+    }
+  ],
+  "relationships": [
+    {
+      "characterA": "角色A名字",
+      "characterB": "角色B名字",
+      "relationType": "ally | enemy | lover | family | mentor | rival | stranger | neutral",
+      "description": "简短关系描述"
+    }
+  ]
+}
 
-仅返回JSON数组。不要markdown。不要评论。`;
+仅返回JSON对象。不要markdown。不要评论。`;
 
 const importCharacterExtractDef: PromptDefinition = {
   key: "import_character_extract",
