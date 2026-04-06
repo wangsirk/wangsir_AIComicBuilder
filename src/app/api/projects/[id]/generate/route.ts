@@ -27,7 +27,8 @@ import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/vi
 import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
 import { assembleVideo } from "@/lib/video/ffmpeg";
-import { parseRefImages, serializeRefImages } from "@/lib/ref-image-utils";
+import { parseRefImages, serializeRefImages, type RefImage } from "@/lib/ref-image-utils";
+import { REF_IMAGE_PROMPT_SYSTEM, buildRefImagePromptsRequest } from "@/lib/ai/prompts/ref-image-prompts";
 
 export const maxDuration = 300;
 
@@ -207,6 +208,14 @@ export async function POST(
 
   if (action === "single_ref_image_generate") {
     return handleSingleRefImageGenerate(projectId, userId, payload, modelConfig);
+  }
+
+  if (action === "generate_ref_prompts") {
+    return handleGenerateRefPrompts(projectId, userId, payload, modelConfig, episodeId);
+  }
+
+  if (action === "single_ref_image_generate_all") {
+    return handleSingleShotRefImageGenerateAll(projectId, userId, payload, modelConfig);
   }
 
   // Image/video generation - keep in task queue
@@ -2771,4 +2780,155 @@ async function handleSingleRefImageGenerate(
   } catch (err) {
     return NextResponse.json({ error: `Generation failed: ${err}` }, { status: 500 });
   }
+}
+
+// --- generate_ref_prompts: AI generates 1-4 reference image prompts per shot ---
+
+async function handleGenerateRefPrompts(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string
+) {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  const batchVersionId = payload?.versionId as string | undefined;
+  const shotWhereConditions = [eq(shots.projectId, projectId)];
+  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
+  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
+
+  const allShots = await db
+    .select()
+    .from(shots)
+    .where(and(...shotWhereConditions))
+    .orderBy(asc(shots.sequence));
+
+  if (allShots.length === 0) {
+    return NextResponse.json({ error: "No shots found" }, { status: 400 });
+  }
+
+  const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
+
+  // Get visual style from script
+  const scriptSource = episodeId
+    ? await db.select({ script: episodes.script }).from(episodes).where(eq(episodes.id, episodeId))
+    : await db.select({ script: projects.script }).from(projects).where(eq(projects.id, projectId));
+  const script = scriptSource[0]?.script || "";
+  const visualStyleMatch = script.match(/视觉风格[：:]\s*(.+?)(?:\n|$)/) || script.match(/Visual Style[：:]\s*(.+?)(?:\n|$)/i);
+  const visualStyle = visualStyleMatch?.[1] || "";
+
+  const textProvider = resolveAIProvider(modelConfig);
+  const promptRequest = buildRefImagePromptsRequest(
+    allShots.map((s) => ({
+      sequence: s.sequence,
+      prompt: s.prompt || "",
+      motionScript: s.motionScript,
+      cameraDirection: s.cameraDirection,
+    })),
+    projectCharacters.map((c) => ({ name: c.name, description: c.description })),
+    visualStyle
+  );
+
+  const result = await textProvider.generateText(promptRequest, {
+    systemPrompt: REF_IMAGE_PROMPT_SYSTEM,
+    temperature: 0.7,
+  });
+
+  // Parse AI response — extract JSON array
+  const jsonMatch = result.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    console.error("[GenerateRefPrompts] AI response not valid JSON:", result.substring(0, 200));
+    return NextResponse.json({ error: "AI did not return valid JSON" }, { status: 500 });
+  }
+
+  const parsed = JSON.parse(jsonMatch[0]) as Array<{
+    shotSequence: number;
+    prompts: string[];
+  }>;
+
+  // Update each shot's referenceImages with the generated prompts
+  let updatedCount = 0;
+  for (const entry of parsed) {
+    const shot = allShots.find((s) => s.sequence === entry.shotSequence);
+    if (!shot || !entry.prompts?.length) continue;
+
+    const refImages: RefImage[] = entry.prompts.map((p) => ({
+      id: genId(),
+      prompt: p,
+      status: "pending" as const,
+    }));
+
+    await db
+      .update(shots)
+      .set({ referenceImages: serializeRefImages(refImages) })
+      .where(eq(shots.id, shot.id));
+    updatedCount++;
+  }
+
+  console.log(`[GenerateRefPrompts] Updated ${updatedCount}/${allShots.length} shots with ref image prompts`);
+  return NextResponse.json({ updatedCount, totalShots: allShots.length });
+}
+
+// --- single_ref_image_generate_all: generate all pending ref images for one shot ---
+
+async function handleSingleShotRefImageGenerateAll(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig
+) {
+  const shotId = payload?.shotId as string;
+  if (!shotId) return NextResponse.json({ error: "No shotId" }, { status: 400 });
+  if (!modelConfig?.image) return NextResponse.json({ error: "No image model" }, { status: 400 });
+
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return NextResponse.json({ error: "Shot not found" }, { status: 404 });
+
+  const refImages = parseRefImages(shot.referenceImages as string);
+  const pending = refImages.filter((r) => r.status === "pending" && r.prompt.trim());
+  if (pending.length === 0) {
+    return NextResponse.json({ message: "No pending ref images", generated: 0 });
+  }
+
+  const projectCharacters = await getEpisodeCharacters(projectId);
+  const charRefs = projectCharacters
+    .filter((c) => !!c.referenceImage)
+    .map((c) => c.referenceImage as string);
+
+  const ratio = (payload?.ratio as string) || "16:9";
+  const imgOpts = ratioToImageOpts(ratio);
+  const imageProvider = resolveImageProvider(modelConfig);
+
+  let generated = 0;
+  for (const entry of pending) {
+    try {
+      const imagePath = await imageProvider.generateImage(entry.prompt, {
+        quality: "hd",
+        ...imgOpts,
+        referenceImages: charRefs,
+      });
+      entry.imagePath = imagePath;
+      entry.status = "generated";
+      generated++;
+      console.log(`[RefImageGenAll] Shot ${shot.sequence}: generated ref "${entry.id}"`);
+    } catch (err) {
+      console.warn(`[RefImageGenAll] Shot ${shot.sequence} ref ${entry.id} failed:`, err);
+    }
+  }
+
+  // Set sceneRefFrame to first generated image (for video gen compatibility)
+  const firstGenerated = refImages.find((r) => r.status === "generated" && r.imagePath);
+
+  await db
+    .update(shots)
+    .set({
+      referenceImages: serializeRefImages(refImages),
+      ...(firstGenerated?.imagePath ? { sceneRefFrame: firstGenerated.imagePath } : {}),
+    })
+    .where(eq(shots.id, shotId));
+
+  return NextResponse.json({ generated, total: pending.length });
 }
