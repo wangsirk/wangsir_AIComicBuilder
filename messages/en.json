@@ -156,7 +156,9 @@
   "storyboard": {
     "stale": "Outdated",
     "regenerateStale": "Regenerate outdated shots",
-    "batchRefImages": "Batch Generate Ref Images"
+    "batchRefImages": "Batch Generate Ref Images",
+    "generateRefPrompts": "Generate Ref Prompts",
+    "batchGenerateRefImages": "Batch Generate Ref Images"
   },
   "episode": {
     "title": "Episodes",

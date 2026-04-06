@@ -157,7 +157,9 @@
   "storyboard": {
     "stale": "需要更新",
     "regenerateStale": "重新生成过期镜头",
-    "batchRefImages": "批量生成参考图"
+    "batchRefImages": "批量生成参考图",
+    "generateRefPrompts": "生成参考图提示词",
+    "batchGenerateRefImages": "批量生成参考图"
   },
   "episode": {
     "title": "分集管理",

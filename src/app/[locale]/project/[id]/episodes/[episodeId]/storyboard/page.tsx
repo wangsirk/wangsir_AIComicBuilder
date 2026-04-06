@@ -66,6 +66,7 @@ export default function EpisodeStoryboardPage() {
   const [lastFailedShots, setLastFailedShots] = useState<string[]>([]);
   const [lastBatchAction, setLastBatchAction] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState(false);
+  const [generatingRefPrompts, setGeneratingRefPrompts] = useState(false);
 
   const currentEpisodeId = useProjectStore((s) => s.currentEpisodeId);
   const episodeStoreEpisodes = useEpisodeStore((s) => s.episodes);
@@ -163,7 +164,27 @@ export default function EpisodeStoryboardPage() {
     return true;
   }, [project.shots, generationMode]);
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingRefImages || generatingVideoPrompts;
+  const shotsWithRefPrompts = useMemo(() => {
+    if (!project) return 0;
+    return project.shots.filter((s) => {
+      try {
+        const refs = JSON.parse(s.referenceImages || "[]");
+        return Array.isArray(refs) && refs.length > 0 && refs.some((r: any) => r.prompt);
+      } catch { return false; }
+    }).length;
+  }, [project?.shots]);
+
+  const shotsWithAllRefImages = useMemo(() => {
+    if (!project) return 0;
+    return project.shots.filter((s) => {
+      try {
+        const refs = JSON.parse(s.referenceImages || "[]");
+        return Array.isArray(refs) && refs.length > 0 && refs.every((r: any) => r.status === "generated" && r.imagePath);
+      } catch { return false; }
+    }).length;
+  }, [project?.shots]);
+
+  const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingRefImages || generatingVideoPrompts || generatingRefPrompts;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -346,6 +367,33 @@ export default function EpisodeStoryboardPage() {
     setGeneratingSceneFrames(false);
     await fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
     setBatchProgress(null);
+  }
+
+  async function handleGenerateRefPrompts() {
+    if (!project) return;
+    if (!textGuard()) return;
+    setGeneratingRefPrompts(true);
+    try {
+      const resp = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate_ref_prompts",
+          payload: { versionId: selectedVersionId },
+          modelConfig: getModelConfig(),
+          episodeId: useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+      if (!resp.ok) throw new Error("Failed");
+      const data = await resp.json();
+      toast.success(`Generated ref prompts for ${data.updatedCount} shots`);
+      await fetchProject(project.id, currentEpisodeId || undefined);
+    } catch (err) {
+      toast.error("Failed to generate ref prompts");
+      console.error(err);
+    } finally {
+      setGeneratingRefPrompts(false);
+    }
   }
 
   async function handleBatchGenerateRefImages() {
@@ -552,9 +600,20 @@ export default function EpisodeStoryboardPage() {
     );
 
     if (needsText) await handleGenerateShots();
-    if (needsFrame) {
-      if (generationMode === "reference") await handleBatchGenerateSceneFrames(false);
-      else await handleBatchGenerateFrames(false);
+    if (generationMode === "reference") {
+      // Step 2a: Generate ref image prompts if needed
+      const needsRefPrompts = shots.some((s) => {
+        try {
+          const refs = JSON.parse(s.referenceImages || "[]");
+          return !Array.isArray(refs) || refs.length === 0;
+        } catch { return true; }
+      });
+      if (needsRefPrompts) await handleGenerateRefPrompts();
+
+      // Step 2b: Generate ref images
+      if (needsFrame) await handleBatchGenerateSceneFrames(false);
+    } else {
+      if (needsFrame) await handleBatchGenerateFrames(false);
     }
     if (needsPrompt) await handleBatchGenerateVideoPrompts();
     if (needsVideo) {
@@ -764,7 +823,36 @@ export default function EpisodeStoryboardPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">2</span>
             <InlineModelPicker capability="image" />
-            {generationMode === "keyframe" ? (
+            {generationMode === "reference" ? (
+              <>
+                <Button
+                  size="sm"
+                  variant={shotsWithRefPrompts === 0 ? "default" : "outline"}
+                  onClick={handleGenerateRefPrompts}
+                  disabled={generatingRefPrompts || anyGenerating || totalShots === 0}
+                >
+                  {generatingRefPrompts ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {generatingRefPrompts ? t("common.generating") : (t("storyboard.generateRefPrompts") || "Generate Ref Prompts")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={shotsWithAllRefImages === totalShots && totalShots > 0 ? "outline" : "default"}
+                  onClick={() => handleBatchGenerateSceneFrames(false)}
+                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages || shotsWithRefPrompts === 0}
+                >
+                  {generatingSceneFrames && !sceneFramesOverwrite ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                  {generatingSceneFrames && !sceneFramesOverwrite ? t("common.generating") : (t("storyboard.batchGenerateRefImages") || "Batch Generate Ref Images")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleBatchGenerateSceneFrames(true)}
+                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            ) : (
               <>
                 <Button
                   onClick={() => handleBatchGenerateFrames(false)}
@@ -806,37 +894,6 @@ export default function EpisodeStoryboardPage() {
                     {t("project.continueFromPrev")}
                   </label>
                 )}
-              </>
-            ) : (
-              <>
-                <Button
-                  onClick={() => handleBatchGenerateSceneFrames(false)}
-                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages}
-                  variant={shotsWithSceneFrames === totalShots && totalShots > 0 ? "outline" : "default"}
-                  size="sm"
-                >
-                  {generatingSceneFrames && !sceneFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ImageIcon className="h-3.5 w-3.5" />
-                  )}
-                  {generatingSceneFrames && !sceneFramesOverwrite
-                    ? t("common.generating")
-                    : t("project.batchGenerateSceneFrames")}
-                </Button>
-                <Button
-                  onClick={() => handleBatchGenerateSceneFrames(true)}
-                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages}
-                  variant="ghost"
-                  size="icon"
-                  title={t("project.batchGenerateSceneFramesOverwrite")}
-                >
-                  {generatingSceneFrames && sceneFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                </Button>
               </>
             )}
           </div>
