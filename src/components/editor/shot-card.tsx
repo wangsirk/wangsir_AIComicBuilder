@@ -213,6 +213,9 @@ export function ShotCard({
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
 
+  // Project characters (reactive)
+  const projectCharacters = useProjectStore((s) => s.project?.characters || []);
+
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -869,7 +872,7 @@ export function ShotCard({
                       {/* Character tags */}
                       <div className="flex items-center gap-1 flex-wrap border-t border-[--border-subtle] px-2 py-1.5">
                         <span className="text-[9px] text-[--text-muted] shrink-0">{t("shot.refChars") || "Chars"}:</span>
-                        {(useProjectStore.getState().project?.characters || []).map((char) => {
+                        {projectCharacters.map((char) => {
                           const isSelected = ref.characters?.includes(char.name);
                           return (
                             <button
