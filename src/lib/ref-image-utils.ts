@@ -5,6 +5,7 @@ export interface RefImage {
   prompt: string;
   imagePath?: string;
   status: "pending" | "generated";
+  characters?: string[]; // character names that appear in this shot (set during ref prompt generation)
 }
 
 /**
@@ -40,6 +41,7 @@ export function parseRefImages(json: string | null | undefined): RefImage[] {
         prompt: (obj.prompt as string) || "",
         imagePath: obj.imagePath as string | undefined,
         status: (obj.status as "pending" | "generated") || (obj.imagePath ? "generated" : "pending"),
+        characters: Array.isArray(obj.characters) ? obj.characters as string[] : undefined,
       };
     });
   } catch {
