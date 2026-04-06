@@ -45,6 +45,7 @@ export default function EpisodeStoryboardPage() {
   const [generatingFrames, setGeneratingFrames] = useState(false);
   const [generatingVideos, setGeneratingVideos] = useState(false);
   const [generatingSceneFrames, setGeneratingSceneFrames] = useState(false);
+  const [generatingRefImages, setGeneratingRefImages] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
   const [sceneFramesOverwrite, setSceneFramesOverwrite] = useState(false);
   const [generatingFramesOverwrite, setGeneratingFramesOverwrite] = useState(false);
@@ -148,7 +149,21 @@ export default function EpisodeStoryboardPage() {
   const charactersWithRefs = project.characters.filter((c) => c.referenceImage);
   const hasReferenceImages = charactersWithRefs.length > 0;
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingVideoPrompts;
+  // Check if all reference images are generated (for reference mode blocking)
+  const allRefImagesGenerated = useMemo(() => {
+    if (generationMode !== "reference") return true;
+    for (const shot of project.shots) {
+      try {
+        const refs = JSON.parse(shot.referenceImages || "[]");
+        if (refs.some((r: any) => typeof r === "object" && r.status === "pending" && r.prompt)) {
+          return false;
+        }
+      } catch {}
+    }
+    return true;
+  }, [project.shots, generationMode]);
+
+  const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingRefImages || generatingVideoPrompts;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -331,6 +346,46 @@ export default function EpisodeStoryboardPage() {
     setGeneratingSceneFrames(false);
     await fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
     setBatchProgress(null);
+  }
+
+  async function handleBatchGenerateRefImages() {
+    if (!project) return;
+    if (!imageGuard()) return;
+    setGeneratingRefImages(true);
+
+    try {
+      const modelConfig = getModelConfig();
+      const resp = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_ref_image_generate",
+          modelConfig,
+          episodeId: currentEpisodeId,
+          payload: { versionId: selectedVersionId },
+        }),
+      });
+
+      if (!resp.ok) throw new Error("Failed");
+      const data = await resp.json();
+
+      const totalGenerated = data.results?.reduce((sum: number, r: any) => sum + (r.generated || 0), 0) || 0;
+      const totalFailed = data.results?.reduce((sum: number, r: any) => sum + (r.failed || 0), 0) || 0;
+
+      if (totalFailed > 0) {
+        toast.error(`${totalFailed} reference images failed`);
+      } else if (totalGenerated > 0) {
+        toast.success(`${totalGenerated} reference images generated`);
+      } else {
+        toast.info("No pending reference images to generate");
+      }
+
+      await fetchProject(project.id, currentEpisodeId || undefined);
+    } catch (err) {
+      toast.error("Batch reference image generation failed");
+    } finally {
+      setGeneratingRefImages(false);
+    }
   }
 
   async function handleBatchGenerateVideoPrompts() {
@@ -782,6 +837,15 @@ export default function EpisodeStoryboardPage() {
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleBatchGenerateRefImages}
+                  disabled={generatingRefImages || generatingSceneFrames || anyGenerating || totalShots === 0}
+                >
+                  {generatingRefImages ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                  {generatingRefImages ? t("common.generating") : (t("storyboard.batchRefImages") || "Batch Generate Ref Images")}
+                </Button>
               </>
             )}
           </div>
@@ -816,7 +880,7 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(false)
                   : handleBatchGenerateVideos(false)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsWithFrames === 0)}
+              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages || !allRefImagesGenerated : shotsWithFrames === 0)}
               variant={shotsWithVideo === totalShots && totalShots > 0 ? "outline" : "default"}
               size="sm"
             >
@@ -837,7 +901,7 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(true)
                   : handleBatchGenerateVideos(true)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsWithFrames === 0)}
+              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages || !allRefImagesGenerated : shotsWithFrames === 0)}
               variant="ghost"
               size="icon"
               title={t("project.batchGenerateVideosOverwrite")}

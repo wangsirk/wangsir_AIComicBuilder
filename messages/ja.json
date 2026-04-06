@@ -153,7 +153,8 @@
   },
   "storyboard": {
     "stale": "更新が必要",
-    "regenerateStale": "古いショットを再生成"
+    "regenerateStale": "古いショットを再生成",
+    "batchRefImages": "参考画像を一括生成"
   },
   "episode": {
     "title": "エピソード管理",

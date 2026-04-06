@@ -153,7 +153,8 @@
   },
   "storyboard": {
     "stale": "업데이트 필요",
-    "regenerateStale": "오래된 샷 재생성"
+    "regenerateStale": "오래된 샷 재생성",
+    "batchRefImages": "참고 이미지 일괄 생성"
   },
   "episode": {
     "title": "에피소드 관리",
