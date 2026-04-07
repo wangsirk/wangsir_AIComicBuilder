@@ -44,15 +44,21 @@ export function parseRefImages(json: string | null | undefined): RefImage[] {
       }
       // New format: RefImage object
       const obj = item as Record<string, unknown>;
+      const imagePath = obj.imagePath as string | undefined;
+      let history = Array.isArray(obj.history) ? obj.history as string[] : undefined;
+      // Auto-migrate: if has imagePath but no history, seed history with current image
+      if (imagePath && (!history || history.length === 0)) {
+        history = [imagePath];
+      }
       return {
         id: (obj.id as string) || genId(),
         type: (obj.type as RefImageType) || "reference",
         prompt: (obj.prompt as string) || "",
-        imagePath: obj.imagePath as string | undefined,
-        status: (obj.status as "pending" | "generated") || (obj.imagePath ? "generated" : "pending"),
+        imagePath,
+        status: (obj.status as "pending" | "generated") || (imagePath ? "generated" : "pending"),
         characters: Array.isArray(obj.characters) ? obj.characters as string[] : undefined,
         model: obj.model as { providerId: string; modelId: string } | undefined,
-        history: Array.isArray(obj.history) ? obj.history as string[] : undefined,
+        history,
       };
     });
   } catch {
