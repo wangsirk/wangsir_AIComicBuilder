@@ -626,7 +626,33 @@ async function handleSingleCharacterImage(
       .update(characters)
       .set({ referenceImage: imagePath })
       .where(eq(characters.id, characterId));
-    return NextResponse.json({ characterId, imagePath, status: "ok" });
+
+    // Mark downstream ref images stale: any shot's referenceImages that include this character
+    // as a "characters" entry should have its generated items reset to pending so they're
+    // regenerated with the new character reference image.
+    const allShots = await db.select().from(shots).where(eq(shots.projectId, character.projectId));
+    let staleCount = 0;
+    for (const shot of allShots) {
+      const refItems = parseRefImages(shot.referenceImages as string);
+      let modified = false;
+      for (const item of refItems) {
+        if (item.characters?.includes(character.name) && item.status === "generated") {
+          item.status = "pending";
+          item.imagePath = undefined;
+          modified = true;
+        }
+      }
+      if (modified) {
+        await db
+          .update(shots)
+          .set({ referenceImages: serializeRefImages(refItems) })
+          .where(eq(shots.id, shot.id));
+        staleCount++;
+      }
+    }
+    console.log(`[SingleCharacterImage] ${character.name} regenerated; marked ${staleCount} shots' ref images as stale`);
+
+    return NextResponse.json({ characterId, imagePath, status: "ok", staleShots: staleCount });
   } catch (err) {
     console.error(`[SingleCharacterImage] Error for ${character.name}:`, err);
     return NextResponse.json({ characterId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
