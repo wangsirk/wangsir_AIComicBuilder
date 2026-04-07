@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { shots, projects, episodes, dialogues, characters } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { assembleVideo } from "@/lib/video/ffmpeg";
+import { loadShotLegacyViewsBatch } from "@/lib/shot-asset-utils";
 import type { Task } from "@/lib/task-queue";
 
 type TransitionType = "cut" | "dissolve" | "fade_in" | "fade_out" | "wipeleft" | "slideright" | "circleopen";
@@ -15,11 +16,18 @@ export async function handleVideoAssemble(task: Task) {
     .where(eq(shots.projectId, payload.projectId))
     .orderBy(asc(shots.sequence));
 
-  const completedShots = projectShots.filter((s) => s.videoUrl);
+  // Load active video assets (keyframe_video / reference_video) for all shots
+  // and surface them via the legacy view shape.
+  const legacy = await loadShotLegacyViewsBatch(projectShots.map((s) => s.id));
+  const shotsWithVideo = projectShots
+    .map((s) => ({
+      shot: s,
+      videoUrl: legacy.get(s.id)?.videoUrl ?? legacy.get(s.id)?.referenceVideoUrl ?? null,
+    }))
+    .filter((x): x is { shot: typeof projectShots[number]; videoUrl: string } => !!x.videoUrl);
 
-  const videoPaths = completedShots
-    .map((s) => s.videoUrl)
-    .filter(Boolean) as string[];
+  const completedShots = shotsWithVideo.map((x) => x.shot);
+  const videoPaths = shotsWithVideo.map((x) => x.videoUrl);
 
   if (videoPaths.length === 0) {
     throw new Error("No video clips to assemble");

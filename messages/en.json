@@ -163,6 +163,8 @@
     "addRefImage": "Add Reference",
     "refImagePrompt": "Reference image prompt...",
     "noRefImages": "No reference image prompts yet",
+    "noKeyframes": "No keyframe prompts yet",
+    "refChars": "Shot characters",
     "generateRefImages": "Generate Ref Images",
     "regenerateRefImages": "Regenerate Ref Images",
     "maxRefImages": "Max 9 reference images",
@@ -323,7 +325,11 @@
       "refImagePromptsDesc": "Generate reference image prompts for each shot from storyboard descriptions",
       "videoGenerate": "Video Generation",
       "refVideoGenerate": "Reference Video",
-      "refVideoPrompt": "Video Prompt Generation"
+      "refVideoPrompt": "Video Prompt Generation",
+      "shotSplitKeyframeAssets": "Shot · Keyframe Asset Prompts",
+      "shotSplitKeyframeAssetsDesc": "Generate first/last frame image prompts from existing shot metadata",
+      "shotSplitReferenceAssets": "Shot · Reference Image Prompts",
+      "shotSplitReferenceAssetsDesc": "Generate reference image prompts from existing shot metadata"
     },
     "editor": {
       "slotMode": "Slots",
@@ -470,7 +476,15 @@
       "compositionRules": "Composition Rules",
       "compositionRulesDesc": "Scene composition and layout requirements",
       "rendering": "Rendering Quality",
-      "renderingDesc": "Rendering and lighting quality requirements"
+      "renderingDesc": "Rendering and lighting quality requirements",
+      "scriptFidelity": "Script Fidelity",
+      "scriptFidelityDesc": "Hard constraint that the shot list must 100% cover the screenplay's narrative content",
+      "originalFidelity": "Source Fidelity",
+      "originalFidelityDesc": "Hard constraint that all dialogue must be preserved verbatim and every event mapped",
+      "rules": "Rules",
+      "rulesDesc": "Core ruleset for this prompt",
+      "durationStrategy": "Duration Strategy",
+      "durationStrategyDesc": "Description-granularity rules tiered by shot duration"
     }
   }
 }

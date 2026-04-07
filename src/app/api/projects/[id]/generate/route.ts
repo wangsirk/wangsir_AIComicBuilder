@@ -28,7 +28,15 @@ import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-ge
 import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { parseRefImages, serializeRefImages, appendToHistory, type RefImage } from "@/lib/ref-image-utils";
+import {
+  loadShotLegacyView,
+  loadShotLegacyViewsBatch,
+  getActiveAsset,
+  insertAssetVersion,
+  patchAsset,
+} from "@/lib/shot-asset-utils";
 import { buildRefImagePromptsRequest } from "@/lib/ai/prompts/ref-image-prompts";
+import { buildKeyframePromptsRequest } from "@/lib/ai/prompts/keyframe-prompts";
 
 export const maxDuration = 300;
 
@@ -170,6 +178,10 @@ export async function POST(
 
   if (action === "shot_split") {
     return handleShotSplitStream(projectId, userId, modelConfig, episodeId);
+  }
+
+  if (action === "generate_keyframe_prompts") {
+    return handleGenerateKeyframePrompts(projectId, userId, payload, modelConfig, episodeId);
   }
 
   if (action === "single_shot_rewrite") {
@@ -492,8 +504,15 @@ async function handleCharacterExtract(
     existingChars.map((c) => [c.name.toLowerCase().trim(), c])
   );
 
-  // If extracting for an episode, clear old episode_characters links for this episode
+  // If extracting for an episode, capture the old episode-linked character ids
+  // BEFORE deleting the links, so we can scope relation cleanup to this episode only.
+  let oldEpisodeCharIds: string[] = [];
   if (episodeId) {
+    const oldLinks = await db
+      .select({ characterId: episodeCharacters.characterId })
+      .from(episodeCharacters)
+      .where(eq(episodeCharacters.episodeId, episodeId));
+    oldEpisodeCharIds = oldLinks.map((l) => l.characterId);
     await db.delete(episodeCharacters).where(eq(episodeCharacters.episodeId, episodeId));
   }
 
@@ -579,8 +598,28 @@ async function handleCharacterExtract(
     }
   }
 
-  // Auto-create character relationships from extraction
+  // Auto-create character relationships from extraction — replace existing on re-run.
+  // Scoping rule: a relation belongs to this episode iff BOTH endpoints are in the
+  // episode's character list. Project-level extraction clears all project relations.
   if (extractedRelations.length > 0) {
+    if (episodeId) {
+      // Episode-scoped: only clear relations whose both endpoints were in this episode.
+      if (oldEpisodeCharIds.length > 0) {
+        await db
+          .delete(characterRelations)
+          .where(
+            and(
+              eq(characterRelations.projectId, projectId),
+              inArray(characterRelations.characterAId, oldEpisodeCharIds),
+              inArray(characterRelations.characterBId, oldEpisodeCharIds)
+            )
+          );
+      }
+    } else {
+      // Project-level: clear everything for the project.
+      await db.delete(characterRelations).where(eq(characterRelations.projectId, projectId));
+    }
+
     const allChars = await db.select().from(characters).where(eq(characters.projectId, projectId));
     const nameToId = new Map(allChars.map((c) => [c.name, c.id]));
 
@@ -666,22 +705,20 @@ async function handleSingleCharacterImage(
     // as a "characters" entry should have its generated items reset to pending so they're
     // regenerated with the new character reference image.
     const allShots = await db.select().from(shots).where(eq(shots.projectId, character.projectId));
+    const legacyMap = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
     let staleCount = 0;
     for (const shot of allShots) {
-      const refItems = parseRefImages(shot.referenceImages as string);
+      const view = legacyMap.get(shot.id);
+      if (!view) continue;
+      const refItems = view.referenceImages;
       let modified = false;
       for (const item of refItems) {
-        if (item.characters?.includes(character.name) && item.status === "generated") {
-          item.status = "pending";
-          item.imagePath = undefined;
+        if (item.characters?.includes(character.name) && item.status === "completed") {
+          await patchAsset(item.id, { status: "pending", fileUrl: null });
           modified = true;
         }
       }
       if (modified) {
-        await db
-          .update(shots)
-          .set({ referenceImages: serializeRefImages(refItems) })
-          .where(eq(shots.id, shot.id));
         staleCount++;
       }
     }
@@ -957,8 +994,6 @@ async function handleShotSplitStream(
       versionId,
       sequence: shot.sequence,
       prompt: shot.sceneDescription,
-      startFrameDesc: shot.startFrame,
-      endFrameDesc: shot.endFrame,
       motionScript: shot.motionScript,
       videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
@@ -970,34 +1005,11 @@ async function handleShotSplitStream(
       depthOfField: shot.depthOfField || "medium",
       soundDesign: shot.soundDesign || "",
       musicCue: shot.musicCue || "",
-      referenceImages: JSON.stringify([
-        // First frame & last frame items (for keyframe mode)
-        {
-          id: genId(),
-          type: "first_frame",
-          prompt: shot.startFrame || "",
-          status: "pending",
-          characters: shot.characters || [],
-        },
-        {
-          id: genId(),
-          type: "last_frame",
-          prompt: shot.endFrame || "",
-          status: "pending",
-          characters: shot.characters || [],
-        },
-        // Reference image items (for reference mode)
-        ...(Array.isArray(shot.referenceImagePrompts) ? shot.referenceImagePrompts : [])
-          .map((p: string) => ({
-            id: genId(),
-            type: "reference",
-            prompt: p,
-            status: "pending",
-            characters: shot.characters || [],
-          })),
-      ]),
       episodeId: episodeId ?? null,
     });
+    // No automatic asset seeding — shot_assets rows are only created when
+    // the user explicitly clicks "生成首尾帧提示词" or "生成参考图提示词".
+    // Each generation button writes only its own asset type.
 
     for (let i = 0; i < (shot.dialogues || []).length; i++) {
       const dialogue = shot.dialogues[i];
@@ -1077,6 +1089,7 @@ async function handleSingleShotRewrite(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
+  const shotView = await loadShotLegacyView(shot.id);
 
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
@@ -1094,8 +1107,8 @@ async function handleSingleShotRewrite(
 
 Current shot (sequence ${shot.sequence}):
 - Scene description: ${shot.prompt || ""}
-- Start frame: ${shot.startFrameDesc || ""}
-- End frame: ${shot.endFrameDesc || ""}
+- Start frame: ${shotView.startFrameDesc || ""}
+- End frame: ${shotView.endFrameDesc || ""}
 - Motion script: ${shot.motionScript || ""}
 - Video script: ${shot.videoScript || ""}
 - Camera direction: ${shot.cameraDirection || "static"}
@@ -1137,13 +1150,32 @@ IMPORTANT: Keep the same scene, characters, and narrative intent. Only rephrase 
       .update(shots)
       .set({
         prompt: parsed.prompt,
-        startFrameDesc: parsed.startFrameDesc,
-        endFrameDesc: parsed.endFrameDesc,
         motionScript: parsed.motionScript,
         videoScript: parsed.videoScript ?? null,
         cameraDirection: parsed.cameraDirection,
       })
       .where(eq(shots.id, shotId));
+    // Update first/last frame prompts in shot_assets
+    {
+      const ff = await getActiveAsset(shotId, "first_frame", 0);
+      if (ff) {
+        await patchAsset(ff.id, { prompt: parsed.startFrameDesc });
+      } else {
+        await insertAssetVersion({
+          shotId, type: "first_frame", sequenceInType: 0,
+          prompt: parsed.startFrameDesc, status: "pending",
+        });
+      }
+      const lf = await getActiveAsset(shotId, "last_frame", 0);
+      if (lf) {
+        await patchAsset(lf.id, { prompt: parsed.endFrameDesc });
+      } else {
+        await insertAssetVersion({
+          shotId, type: "last_frame", sequenceInType: 0,
+          prompt: parsed.endFrameDesc, status: "pending",
+        });
+      }
+    }
 
     return NextResponse.json({ shotId, status: "ok", ...parsed });
   } catch (err) {
@@ -1182,72 +1214,11 @@ async function handleBatchFrameGenerate(
   if (allShots.length === 0) {
     return NextResponse.json({ results: [], message: "No shots found" });
   }
-
-  const continueFromPrev = payload?.continueFromPrev === true;
-  let copiedFirstFrame: string | undefined;
+  const allShotsLegacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
 
   const versionedUploadDir = batchVersionId
     ? await getVersionedUploadDir(batchVersionId)
     : process.env.UPLOAD_DIR || "./uploads";
-
-  if (continueFromPrev && episodeId) {
-    // 1. Get current episode's sequence
-    const [currentEp] = await db
-      .select({ sequence: episodes.sequence })
-      .from(episodes)
-      .where(eq(episodes.id, episodeId));
-
-    if (currentEp && currentEp.sequence > 1) {
-      // 2. Find previous episode
-      const [prevEp] = await db
-        .select({ id: episodes.id })
-        .from(episodes)
-        .where(
-          and(
-            eq(episodes.projectId, projectId),
-            eq(episodes.sequence, currentEp.sequence - 1)
-          )
-        );
-
-      if (prevEp) {
-        // 3. Get last shot of previous episode
-        const [lastShot] = await db
-          .select({ lastFrame: shots.lastFrame })
-          .from(shots)
-          .where(eq(shots.episodeId, prevEp.id))
-          .orderBy(desc(shots.sequence))
-          .limit(1);
-
-        if (!lastShot?.lastFrame) {
-          return NextResponse.json(
-            { error: "上一集尚未生成帧，无法续接" },
-            { status: 400 }
-          );
-        }
-
-        // 4. Copy the file
-        const fs = await import("node:fs");
-        const path = await import("node:path");
-        const { id: _genId } = await import("@/lib/id");
-        const ext = path.extname(lastShot.lastFrame);
-        const destDir = path.resolve(versionedUploadDir, "frames");
-        fs.mkdirSync(destDir, { recursive: true });
-        const destPath = path.join(destDir, `${_genId()}${ext}`);
-        fs.copyFileSync(path.resolve(lastShot.lastFrame), destPath);
-        const relativeDest = path.relative(process.cwd(), destPath);
-
-        // 5. Update first shot's firstFrame
-        if (allShots.length > 0) {
-          await db
-            .update(shots)
-            .set({ firstFrame: relativeDest })
-            .where(eq(shots.id, allShots[0].id));
-          allShots[0] = { ...allShots[0], firstFrame: relativeDest };
-          copiedFirstFrame = relativeDest;
-        }
-      }
-    }
-  }
 
   // Fetch only characters linked to this episode
   let frameCharacters: typeof characters.$inferSelect[];
@@ -1275,7 +1246,10 @@ async function handleBatchFrameGenerate(
   const results: Array<{ shotId: string; sequence: number; status: string; firstFrame?: string; lastFrame?: string; error?: string }> = [];
 
   const overwrite = payload?.overwrite === true;
-  const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
+  const needProcess = allShots.filter((s) => {
+    const v = allShotsLegacy.get(s.id);
+    return overwrite || !v?.firstFrame || !v?.lastFrame;
+  });
   const skipCount = allShots.length - needProcess.length;
 
   console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}`);
@@ -1283,104 +1257,120 @@ async function handleBatchFrameGenerate(
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
-  let previousLastFrame: string | undefined;
+  // ── Concurrent per-shot generation ──
+  // Each shot is fully independent under the new shot_assets architecture:
+  // first/last frame prompts are pre-generated and stored, no continuity
+  // chain needed. Run all shots in parallel via Promise.allSettled.
+  const total = allShots.length;
+  let doneCount = 0;
+  console.log(`[BatchFrameGenerate] Starting concurrent generation: 0/${total}`);
 
-  for (let i = 0; i < allShots.length; i++) {
-    const shot = allShots[i];
+  const settled = await Promise.allSettled(
+    allShots.map(async (shot) => {
+      const shotLegacy = allShotsLegacy.get(shot.id);
 
-    // Skip completed shots in normal mode, but advance the chain from their existing lastFrame
-    if (!overwrite && shot.firstFrame && shot.lastFrame) {
-      previousLastFrame = shot.lastFrame;
-      results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
-        status: "skipped",
-      });
-      continue;
-    }
+      if (!overwrite && shotLegacy?.firstFrame && shotLegacy?.lastFrame) {
+        doneCount++;
+        console.log(`[BatchFrameGenerate] ⊙ shot ${shot.sequence} skipped (${doneCount}/${total})`);
+        return {
+          shotId: shot.id,
+          sequence: shot.sequence,
+          status: "skipped" as const,
+        };
+      }
 
-    const startTime = Date.now();
-    try {
-      await db
-        .update(shots)
-        .set({ status: "generating" })
-        .where(eq(shots.id, shot.id));
+      const startTime = Date.now();
+      try {
+        await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id));
 
-      let firstFramePath: string;
-
-      if (copiedFirstFrame && i === 0) {
-        // Episode continuation: use copied frame from previous episode
-        firstFramePath = copiedFirstFrame;
-      } else if (i === 0 || !previousLastFrame) {
-        // First shot or broken chain: generate first frame
+        // Each shot is independent — generate its own first frame from prompt.
         const firstPrompt = buildFirstFramePrompt({
           sceneDescription: shot.prompt || "",
-          startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+          startFrameDesc: shotLegacy?.startFrameDesc || shot.prompt || "",
           characterDescriptions,
           slotContents: frameFirstSlots,
         });
-        firstFramePath = await ai.generateImage(firstPrompt, {
+        const firstFramePath = await ai.generateImage(firstPrompt, {
           ...imageOpts,
           quality: "hd",
           referenceImages: charRefImages,
           referenceLabels: charRefLabels,
         });
-      } else {
-        // Continuity chain: reuse previous shot's last frame
-        firstFramePath = previousLastFrame;
-      }
 
-      // Generate last frame for this shot
-      const lastPrompt = buildLastFramePrompt({
-        sceneDescription: shot.prompt || "",
-        endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-        characterDescriptions,
-        firstFramePath,
-        slotContents: frameLastSlots,
-      });
-      const lastFramePath = await ai.generateImage(lastPrompt, {
-        ...imageOpts,
-        quality: "hd",
-        referenceImages: [firstFramePath, ...charRefImages],
+        const lastPrompt = buildLastFramePrompt({
+          sceneDescription: shot.prompt || "",
+          endFrameDesc: shotLegacy?.endFrameDesc || shot.prompt || "",
+          characterDescriptions,
+          firstFramePath,
+          slotContents: frameLastSlots,
+        });
+        const lastFramePath = await ai.generateImage(lastPrompt, {
+          ...imageOpts,
+          quality: "hd",
+          referenceImages: [firstFramePath, ...charRefImages],
           referenceLabels: ["首帧/First Frame", ...charRefLabels],
-      });
+        });
 
-      await db
-        .update(shots)
-        .set({
+        await db.update(shots).set({ status: "completed" }).where(eq(shots.id, shot.id));
+
+        const ffEx = await getActiveAsset(shot.id, "first_frame", 0);
+        if (ffEx) await patchAsset(ffEx.id, { fileUrl: firstFramePath, status: "completed" });
+        else
+          await insertAssetVersion({
+            shotId: shot.id,
+            type: "first_frame",
+            sequenceInType: 0,
+            prompt: shotLegacy?.startFrameDesc ?? "",
+            fileUrl: firstFramePath,
+            status: "completed",
+          });
+        const lfEx = await getActiveAsset(shot.id, "last_frame", 0);
+        if (lfEx) await patchAsset(lfEx.id, { fileUrl: lastFramePath, status: "completed" });
+        else
+          await insertAssetVersion({
+            shotId: shot.id,
+            type: "last_frame",
+            sequenceInType: 0,
+            prompt: shotLegacy?.endFrameDesc ?? "",
+            fileUrl: lastFramePath,
+            status: "completed",
+          });
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        doneCount++;
+        console.log(`[BatchFrameGenerate] ✓ shot ${shot.sequence} (${doneCount}/${total}) ${elapsed}s`);
+
+        return {
+          shotId: shot.id,
+          sequence: shot.sequence,
+          status: "ok" as const,
           firstFrame: firstFramePath,
           lastFrame: lastFramePath,
-          status: "completed",
-        })
-        .where(eq(shots.id, shot.id));
+        };
+      } catch (err) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        doneCount++;
+        console.error(`[BatchFrameGenerate] ✗ shot ${shot.sequence} (${doneCount}/${total}) ${elapsed}s:`, err);
+        await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
+        return {
+          shotId: shot.id,
+          sequence: shot.sequence,
+          status: "error" as const,
+          error: extractErrorMessage(err),
+        };
+      }
+    })
+  );
 
-      previousLastFrame = lastFramePath;
-
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed (${elapsed}s)`);
-
+  for (const r of settled) {
+    if (r.status === "fulfilled") results.push(r.value);
+    else
       results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
-        status: "ok",
-        firstFrame: firstFramePath,
-        lastFrame: lastFramePath,
-      });
-    } catch (err) {
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.error(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
-      await db
-        .update(shots)
-        .set({ status: "failed" })
-        .where(eq(shots.id, shot.id));
-      previousLastFrame = undefined; // Break chain so next shot generates its own first frame
-      results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
+        shotId: "",
+        sequence: -1,
         status: "error",
-        error: extractErrorMessage(err),
+        error: String(r.reason),
       });
-    }
   }
 
   const okCount = results.filter((r) => r.status === "ok").length;
@@ -1412,8 +1402,14 @@ async function handleSingleFrameGenerate(
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
 
-  const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
+  // Read prompts from shot_assets — they were generated by the dedicated
+  // "生成首尾帧提示词" step. Each shot is independent: no continuity chain.
+  const ffAsset = await getActiveAsset(shotId, "first_frame", 0);
+  const lfAsset = await getActiveAsset(shotId, "last_frame", 0);
+  const startFramePromptText = ffAsset?.prompt || shot.prompt || "";
+  const endFramePromptText = lfAsset?.prompt || shot.prompt || "";
 
+  const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
 
@@ -1425,49 +1421,6 @@ async function handleSingleFrameGenerate(
     .map((c) => c.referenceImage)
     .filter(Boolean) as string[];
 
-  // Find previous shot's last frame for continuity — same version only (if shot has a version)
-  const [previousShot] = shot.versionId
-    ? await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          eq(shots.versionId, shot.versionId),
-          lt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(desc(shots.sequence))
-        .limit(1)
-    : await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          lt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(desc(shots.sequence))
-        .limit(1);
-
-  const [nextShot] = shot.versionId
-    ? await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          eq(shots.versionId, shot.versionId),
-          gt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(asc(shots.sequence))
-        .limit(1)
-    : await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          gt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(asc(shots.sequence))
-        .limit(1);
-
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
 
@@ -1477,27 +1430,21 @@ async function handleSingleFrameGenerate(
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
-    // Reuse previous shot's lastFrame directly — no need to regenerate
-    let firstFramePath: string;
-    if (previousShot?.lastFrame) {
-      firstFramePath = previousShot.lastFrame;
-    } else {
-      const firstPrompt = buildFirstFramePrompt({
-        sceneDescription: shot.prompt || "",
-        startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-        characterDescriptions,
-        slotContents: frameFirstSlots,
-      });
-      firstFramePath = await ai.generateImage(firstPrompt, {
-        ...imageOpts,
-        quality: "hd",
-        referenceImages: charRefImages,
-      });
-    }
+    const firstPrompt = buildFirstFramePrompt({
+      sceneDescription: shot.prompt || "",
+      startFrameDesc: startFramePromptText,
+      characterDescriptions,
+      slotContents: frameFirstSlots,
+    });
+    const firstFramePath = await ai.generateImage(firstPrompt, {
+      ...imageOpts,
+      quality: "hd",
+      referenceImages: charRefImages,
+    });
 
     const lastPrompt = buildLastFramePrompt({
       sceneDescription: shot.prompt || "",
-      endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+      endFrameDesc: endFramePromptText,
       characterDescriptions,
       firstFramePath,
       slotContents: frameLastSlots,
@@ -1508,18 +1455,28 @@ async function handleSingleFrameGenerate(
       referenceImages: [firstFramePath, ...charRefImages],
     });
 
-    await db
-      .update(shots)
-      .set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" })
-      .where(eq(shots.id, shotId));
+    await db.update(shots).set({ status: "completed" }).where(eq(shots.id, shotId));
 
-    // Sync next shot's firstFrame to maintain continuity chain
-    if (nextShot) {
-      await db
-        .update(shots)
-        .set({ firstFrame: lastFramePath })
-        .where(eq(shots.id, nextShot.id));
-    }
+    if (ffAsset) await patchAsset(ffAsset.id, { fileUrl: firstFramePath, status: "completed" });
+    else
+      await insertAssetVersion({
+        shotId,
+        type: "first_frame",
+        sequenceInType: 0,
+        prompt: startFramePromptText,
+        fileUrl: firstFramePath,
+        status: "completed",
+      });
+    if (lfAsset) await patchAsset(lfAsset.id, { fileUrl: lastFramePath, status: "completed" });
+    else
+      await insertAssetVersion({
+        shotId,
+        type: "last_frame",
+        sequenceInType: 0,
+        prompt: endFramePromptText,
+        fileUrl: lastFramePath,
+        status: "completed",
+      });
 
     return NextResponse.json({ shotId, firstFrame: firstFramePath, lastFrame: lastFramePath, status: "ok" });
   } catch (err) {
@@ -1549,7 +1506,8 @@ async function handleSingleVideoGenerate(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
-  if (!shot.firstFrame || !shot.lastFrame) {
+  const shotView = await loadShotLegacyView(shot.id);
+  if (!shotView.firstFrame || !shotView.lastFrame) {
     return NextResponse.json({ error: "Shot frames not generated yet" }, { status: 400 });
   }
 
@@ -1585,12 +1543,12 @@ async function handleSingleVideoGenerate(
     const videoContextForDialogue = videoScript;
     const onScreenDialogueChars = shotDialogues
       .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-      .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
+      .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shotView.startFrameDesc));
 
     const dialogueList = shotDialogues.map((d) => {
       const char = shotCharacters.find((c) => c.id === d.characterId);
       const characterName = char?.name ?? "Unknown";
-      const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+      const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotView.startFrameDesc);
       const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
       return {
         characterName,
@@ -1602,8 +1560,8 @@ async function handleSingleVideoGenerate(
     const videoPrompt = shot.videoPrompt || buildVideoPrompt({
       videoScript,
       cameraDirection: shot.cameraDirection || "static",
-      startFrameDesc: shot.startFrameDesc ?? undefined,
-      endFrameDesc: shot.endFrameDesc ?? undefined,
+      startFrameDesc: shotView.startFrameDesc ?? undefined,
+      endFrameDesc: shotView.endFrameDesc ?? undefined,
       duration: effectiveDuration,
       characters: shotCharacters,
       dialogues: dialogueList.length > 0 ? dialogueList : undefined,
@@ -1611,26 +1569,22 @@ async function handleSingleVideoGenerate(
     });
 
     const result = await videoProvider.generateVideo({
-      firstFrame: shot.firstFrame,
-      lastFrame: shot.lastFrame,
+      firstFrame: shotView.firstFrame,
+      lastFrame: shotView.lastFrame,
       prompt: videoPrompt,
       duration: effectiveDuration,
       ratio,
     });
 
-    // Track video history
-    const { trackMediaHistory } = await import("@/lib/ref-image-utils");
-    const [latestForVideo] = await db.select().from(shots).where(eq(shots.id, shotId));
-    const refsForVideo = parseRefImages(latestForVideo?.referenceImages as string);
-    const updatedRefsForVideo = trackMediaHistory(refsForVideo, "video", result.filePath);
+    // Track video history via shot_assets keyframe_video slot
+    await insertAssetVersion({
+      shotId, type: "keyframe_video", sequenceInType: 0,
+      prompt: videoPrompt, fileUrl: result.filePath, status: "completed",
+    });
 
     await db
       .update(shots)
-      .set({
-        videoUrl: result.filePath,
-        referenceImages: serializeRefImages(updatedRefsForVideo),
-        status: "completed",
-      })
+      .set({ status: "completed" })
       .where(eq(shots.id, shotId));
 
     return NextResponse.json({ shotId, videoUrl: result.filePath, status: "ok" });
@@ -1669,9 +1623,11 @@ async function handleBatchVideoGenerate(
     : process.env.UPLOAD_DIR || "./uploads";
 
   const overwrite = payload?.overwrite === true;
-  const eligible = allShots.filter((s) =>
-    s.firstFrame && s.lastFrame && (overwrite || !s.videoUrl)
-  );
+  const allShotsLegacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
+  const eligible = allShots.filter((s) => {
+    const v = allShotsLegacy.get(s.id);
+    return v?.firstFrame && v?.lastFrame && (overwrite || !v?.videoUrl);
+  });
   if (eligible.length === 0) {
     return NextResponse.json({ results: [], message: "No eligible shots" });
   }
@@ -1696,6 +1652,7 @@ async function handleBatchVideoGenerate(
   const results = await Promise.all(
     eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; videoUrl?: string; error?: string }> => {
       try {
+        const shotLegacy = allShotsLegacy.get(shot.id);
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
@@ -1707,12 +1664,12 @@ async function handleBatchVideoGenerate(
         const videoContextForDialogue = videoScript;
         const onScreenDialogueChars = shotDialogues
           .map((d) => batchCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
+          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shotLegacy?.startFrameDesc ?? null));
 
         const dialogueList = shotDialogues.map((d) => {
           const char = batchCharacters.find((c) => c.id === d.characterId);
           const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotLegacy?.startFrameDesc ?? null);
           const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
           return {
             characterName,
@@ -1725,8 +1682,8 @@ async function handleBatchVideoGenerate(
         const videoPrompt = shot.videoPrompt || buildVideoPrompt({
           videoScript,
           cameraDirection: shot.cameraDirection || "static",
-          startFrameDesc: shot.startFrameDesc ?? undefined,
-          endFrameDesc: shot.endFrameDesc ?? undefined,
+          startFrameDesc: shotLegacy?.startFrameDesc ?? undefined,
+          endFrameDesc: shotLegacy?.endFrameDesc ?? undefined,
           duration: effectiveDuration,
           characters: batchCharacters,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
@@ -1734,25 +1691,20 @@ async function handleBatchVideoGenerate(
         });
 
         const result = await videoProvider.generateVideo({
-          firstFrame: shot.firstFrame!,
-          lastFrame: shot.lastFrame!,
+          firstFrame: shotLegacy!.firstFrame!,
+          lastFrame: shotLegacy!.lastFrame!,
           prompt: videoPrompt,
           duration: effectiveDuration,
           ratio,
         });
 
-        // Track video history
-        const { trackMediaHistory: trackHistBatch } = await import("@/lib/ref-image-utils");
-        const refsForBatchVideo = parseRefImages(shot.referenceImages as string);
-        const updatedBatchVideo = trackHistBatch(refsForBatchVideo, "video", result.filePath);
-
+        await insertAssetVersion({
+          shotId: shot.id, type: "keyframe_video", sequenceInType: 0,
+          prompt: videoPrompt, fileUrl: result.filePath, status: "completed",
+        });
         await db
           .update(shots)
-          .set({
-            videoUrl: result.filePath,
-            referenceImages: serializeRefImages(updatedBatchVideo),
-            status: "completed",
-          })
+          .set({ status: "completed" })
           .where(eq(shots.id, shot.id));
 
         console.log(`[BatchVideoGenerate] Shot ${shot.sequence} completed`);
@@ -1817,12 +1769,13 @@ async function handleSingleSceneFrame(
 
     const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
     const slotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
+    const sceneFrameView = await loadShotLegacyView(shot.id);
     const sceneFramePrompt = buildSceneFramePrompt({
       sceneDescription: shot.prompt || "",
       charRefMapping,
       characterDescriptions,
       cameraDirection: shot.cameraDirection,
-      startFrameDesc: shot.startFrameDesc,
+      startFrameDesc: sceneFrameView.startFrameDesc,
       motionScript: shot.motionScript,
       slotContents,
     });
@@ -1834,9 +1787,14 @@ async function handleSingleSceneFrame(
       referenceImages: charRefs.map((c) => c.imagePath),
     });
 
+    {
+      const refEx = await getActiveAsset(shotId, "reference", 0);
+      if (refEx) await patchAsset(refEx.id, { fileUrl: sceneFramePath, status: "completed" });
+      else await insertAssetVersion({ shotId, type: "reference", sequenceInType: 0, prompt: "", fileUrl: sceneFramePath, status: "completed" });
+    }
     await db
       .update(shots)
-      .set({ sceneRefFrame: sceneFramePath, status: "pending" })
+      .set({ status: "pending" })
       .where(eq(shots.id, shotId));
 
     return NextResponse.json({ shotId, sceneRefFrame: sceneFramePath, status: "ok" });
@@ -1885,13 +1843,14 @@ async function handleBatchSceneFrame(
   }
 
   const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
+  const allShotsLegacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
 
   // Mark all eligible shots as generating
   const eligible = allShots.filter((shot) => {
-    const refImages = parseRefImages(shot.referenceImages as string);
+    const refImages = allShotsLegacy.get(shot.id)?.referenceImages ?? [];
     const targets = overwrite
-      ? refImages.filter((r) => r.type === "reference" && r.prompt.trim())
-      : refImages.filter((r) => r.type === "reference" && r.status === "pending" && r.prompt.trim());
+      ? refImages.filter((r) => r.prompt.trim())
+      : refImages.filter((r) => r.status === "pending" && r.prompt.trim());
     return targets.length > 0;
   });
 
@@ -1902,10 +1861,10 @@ async function handleBatchSceneFrame(
   // Process all shots concurrently
   const results = await Promise.all(
     allShots.map(async (shot) => {
-      const refImages = parseRefImages(shot.referenceImages as string);
+      const refImages = allShotsLegacy.get(shot.id)?.referenceImages ?? [];
       const targets = overwrite
-        ? refImages.filter((r) => r.type === "reference" && r.prompt.trim())
-        : refImages.filter((r) => r.type === "reference" && r.status === "pending" && r.prompt.trim());
+        ? refImages.filter((r) => r.prompt.trim())
+        : refImages.filter((r) => r.status === "pending" && r.prompt.trim());
 
       if (targets.length === 0) {
         return { shotId: shot.id, sequence: shot.sequence, status: "ok" as const, generated: 0 };
@@ -1933,12 +1892,13 @@ async function handleBatchSceneFrame(
               ...imageOpts,
               referenceImages: shotCharRefs,
             });
-            // Update entry via appendToHistory pattern
-            const updated = appendToHistory(entry, imagePath);
-            entry.imagePath = updated.imagePath;
-            entry.status = updated.status;
-            entry.history = updated.history;
-            console.log(`[BatchRefImage] Shot ${shot.sequence}: ref "${entry.id}" done (history: ${entry.history?.length})`);
+            // Persist as a new version of this reference slot
+            await insertAssetVersion({
+              shotId: shot.id, type: "reference", sequenceInType: entry.sequenceInType,
+              prompt: entry.prompt, fileUrl: imagePath, status: "completed",
+              characters: entry.characters ?? undefined,
+            });
+            console.log(`[BatchRefImage] Shot ${shot.sequence}: ref "${entry.id}" done`);
             return true;
           } catch (err) {
             console.warn(`[BatchRefImage] Shot ${shot.sequence} ref ${entry.id} failed:`, err);
@@ -1948,15 +1908,10 @@ async function handleBatchSceneFrame(
       );
 
       const generated = genResults.filter(Boolean).length;
-      const firstGenerated = refImages.find((r) => r.status === "generated" && r.imagePath);
 
       await db
         .update(shots)
-        .set({
-          referenceImages: serializeRefImages(refImages),
-          ...(firstGenerated?.imagePath ? { sceneRefFrame: firstGenerated.imagePath } : {}),
-          status: "pending",
-        })
+        .set({ status: "pending" })
         .where(eq(shots.id, shot.id));
 
       return { shotId: shot.id, sequence: shot.sequence, status: "ok" as const, generated };
@@ -1989,6 +1944,7 @@ async function handleSingleReferenceVideo(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
+  const shotView = await loadShotLegacyView(shot.id);
 
   const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
 
@@ -2024,12 +1980,12 @@ async function handleSingleReferenceVideo(
   const videoContextForDialogue = shot.motionScript || shot.videoScript || shot.prompt || "";
   const onScreenDialogueChars = shotDialogues
     .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-  
+    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shotView.startFrameDesc));
+
   const dialogueList = shotDialogues.map((d) => {
     const char = projectCharacters.find((c) => c.id === d.characterId);
     const characterName = char?.name ?? "Unknown";
-    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotView.startFrameDesc);
     const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
     return {
       characterName,
@@ -2046,9 +2002,8 @@ async function handleSingleReferenceVideo(
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
     // Step 1: Prefer the first user-selected reference image, fall back to sceneRefFrame
-    const refItemsForVideo = parseRefImages(shot.referenceImages as string)
-      .filter((r) => r.type === "reference" && r.imagePath);
-    let sceneFramePath: string | null = refItemsForVideo[0]?.imagePath || shot.sceneRefFrame || null;
+    const refItemsForVideo = shotView.referenceImages.filter((r) => r.fileUrl);
+    let sceneFramePath: string | null = refItemsForVideo[0]?.fileUrl || shotView.sceneRefFrame || null;
     if (!sceneFramePath) {
       const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
       const refSlotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
@@ -2057,7 +2012,7 @@ async function handleSingleReferenceVideo(
         charRefMapping,
         characterDescriptions,
         cameraDirection: shot.cameraDirection,
-        startFrameDesc: shot.startFrameDesc,
+        startFrameDesc: shotView.startFrameDesc,
         motionScript: shot.motionScript,
         slotContents: refSlotContents,
       });
@@ -2066,7 +2021,11 @@ async function handleSingleReferenceVideo(
         quality: "hd",
         referenceImages: charRefs.map((c) => c.imagePath),
       });
-      await db.update(shots).set({ sceneRefFrame: sceneFramePath }).where(eq(shots.id, shotId));
+      {
+        const refEx = await getActiveAsset(shotId, "reference", 0);
+        if (refEx) await patchAsset(refEx.id, { fileUrl: sceneFramePath, status: "completed" });
+        else await insertAssetVersion({ shotId, type: "reference", sequenceInType: 0, prompt: "", fileUrl: sceneFramePath, status: "completed" });
+      }
     } else {
       console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: reusing existing scene frame`);
     }
@@ -2116,10 +2075,10 @@ async function handleSingleReferenceVideo(
 
     console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
-    // Use generated reference images (type=reference with imagePath), fall back to character refs
-    const shotRefItems = parseRefImages(shot.referenceImages as string)
-      .filter((r) => r.type === "reference" && r.imagePath)
-      .map((r) => r.imagePath as string);
+    // Use generated reference images (active reference assets), fall back to character refs
+    const shotRefItems = shotView.referenceImages
+      .filter((r) => r.fileUrl)
+      .map((r) => r.fileUrl as string);
     const allRefImages = shotRefItems.length > 0
       ? shotRefItems
       : charRefs.map((c) => c.imagePath);
@@ -2132,20 +2091,14 @@ async function handleSingleReferenceVideo(
       referenceImages: allRefImages,
     });
 
-    // Track ref video history
-    const { trackMediaHistory: trackHistRefVid } = await import("@/lib/ref-image-utils");
-    const [latestForRefVid] = await db.select().from(shots).where(eq(shots.id, shotId));
-    const refsForRefVid = parseRefImages(latestForRefVid?.referenceImages as string);
-    const updatedRefsForRefVid = trackHistRefVid(refsForRefVid, "ref_video", result.filePath);
-
+    await insertAssetVersion({
+      shotId, type: "reference_video", sequenceInType: 0,
+      prompt: videoPrompt, fileUrl: result.filePath, status: "completed",
+      meta: result.lastFrameUrl ? { lastFrameUrl: result.lastFrameUrl } : null,
+    });
     await db
       .update(shots)
-      .set({
-        referenceVideoUrl: result.filePath,
-        lastFrameUrl: result.lastFrameUrl ?? null,
-        referenceImages: serializeRefImages(updatedRefsForRefVid),
-        status: "completed",
-      })
+      .set({ status: "completed" })
       .where(eq(shots.id, shotId));
 
     return NextResponse.json({ shotId, referenceVideoUrl: result.filePath, status: "ok" });
@@ -2190,9 +2143,11 @@ async function handleBatchReferenceVideo(
     : process.env.UPLOAD_DIR || "./uploads";
 
   const overwrite = payload?.overwrite === true;
-  const eligible = allShots.filter(
-    (s) => s.status !== "generating" && (overwrite || !s.referenceVideoUrl)
-  );
+  const allShotsLegacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
+  const eligible = allShots.filter((s) => {
+    const v = allShotsLegacy.get(s.id);
+    return s.status !== "generating" && (overwrite || !v?.referenceVideoUrl);
+  });
   if (eligible.length === 0) {
     return NextResponse.json({ results: [], message: "No eligible shots" });
   }
@@ -2235,6 +2190,7 @@ async function handleBatchReferenceVideo(
   const results = await Promise.all(
     eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; referenceVideoUrl?: string; error?: string }> => {
       try {
+        const shotLegacy = allShotsLegacy.get(shot.id)!;
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
@@ -2244,12 +2200,12 @@ async function handleBatchReferenceVideo(
         const videoContextForDialogue = shot.motionScript || shot.videoScript || shot.prompt || "";
         const onScreenDialogueChars = shotDialogues
           .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
+          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shotLegacy.startFrameDesc));
 
         const dialogueList = shotDialogues.map((d) => {
           const char = projectCharacters.find((c) => c.id === d.characterId);
           const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotLegacy.startFrameDesc);
           const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
           return {
             characterName,
@@ -2260,9 +2216,8 @@ async function handleBatchReferenceVideo(
         });
 
         // Step 1: Prefer user-selected first reference image; only regenerate scene frame if absent
-        const refItemsForBatchVideo = parseRefImages(shot.referenceImages as string)
-          .filter((r) => r.type === "reference" && r.imagePath);
-        let sceneFramePath: string = refItemsForBatchVideo[0]?.imagePath || shot.sceneRefFrame || "";
+        const refItemsForBatchVideo = shotLegacy.referenceImages.filter((r) => r.fileUrl);
+        let sceneFramePath: string = refItemsForBatchVideo[0]?.fileUrl || shotLegacy.sceneRefFrame || "";
 
         if (!sceneFramePath) {
           const batchRefSlots = await resolveSlotContents("scene_frame_generate", { userId, projectId });
@@ -2271,7 +2226,7 @@ async function handleBatchReferenceVideo(
             charRefMapping,
             characterDescriptions,
             cameraDirection: shot.cameraDirection,
-            startFrameDesc: shot.startFrameDesc,
+            startFrameDesc: shotLegacy.startFrameDesc,
             motionScript: shot.motionScript,
             slotContents: batchRefSlots,
           });
@@ -2283,7 +2238,11 @@ async function handleBatchReferenceVideo(
             referenceImages: charRefs.map((c) => c.imagePath),
           });
 
-          await db.update(shots).set({ sceneRefFrame: sceneFramePath }).where(eq(shots.id, shot.id));
+          {
+            const refEx = await getActiveAsset(shot.id, "reference", 0);
+            if (refEx) await patchAsset(refEx.id, { fileUrl: sceneFramePath, status: "completed" });
+            else await insertAssetVersion({ shotId: shot.id, type: "reference", sequenceInType: 0, prompt: "", fileUrl: sceneFramePath, status: "completed" });
+          }
         } else {
           console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: using selected ref image as scene frame`);
         }
@@ -2323,10 +2282,10 @@ async function handleBatchReferenceVideo(
 
         console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
-        // Use generated reference images (type=reference with imagePath), fall back to character refs
-        const shotRefItems = parseRefImages(shot.referenceImages as string)
-          .filter((r) => r.type === "reference" && r.imagePath)
-          .map((r) => r.imagePath as string);
+        // Use generated reference images (active reference assets), fall back to character refs
+        const shotRefItems = shotLegacy.referenceImages
+          .filter((r) => r.fileUrl)
+          .map((r) => r.fileUrl as string);
         const allRefImages = shotRefItems.length > 0
           ? shotRefItems
           : charRefs.map((c) => c.imagePath);
@@ -2339,19 +2298,14 @@ async function handleBatchReferenceVideo(
           referenceImages: allRefImages,
         });
 
-        // Track ref video history
-        const { trackMediaHistory: trackHistBatchRefVid } = await import("@/lib/ref-image-utils");
-        const refsForBatchRefVid = parseRefImages(shot.referenceImages as string);
-        const updatedBatchRefVid = trackHistBatchRefVid(refsForBatchRefVid, "ref_video", result.filePath);
-
+        await insertAssetVersion({
+          shotId: shot.id, type: "reference_video", sequenceInType: 0,
+          prompt: videoPrompt, fileUrl: result.filePath, status: "completed",
+          meta: result.lastFrameUrl ? { lastFrameUrl: result.lastFrameUrl } : null,
+        });
         await db
           .update(shots)
-          .set({
-            referenceVideoUrl: result.filePath,
-            lastFrameUrl: result.lastFrameUrl ?? null,
-            referenceImages: serializeRefImages(updatedBatchRefVid),
-            status: "completed",
-          })
+          .set({ status: "completed" })
           .where(eq(shots.id, shot.id));
 
         console.log(`[BatchReferenceVideo] Shot ${shot.sequence} completed`);
@@ -2410,8 +2364,12 @@ async function handleVideoAssembleSync(projectId: string, payload?: Record<strin
     .orderBy(asc(shots.sequence));
 
   const isReference = generationModeValue === "reference";
+  const projectShotsLegacy = await loadShotLegacyViewsBatch(projectShots.map((s) => s.id));
   const videoPaths = projectShots
-    .map((s) => isReference ? s.referenceVideoUrl : s.videoUrl)
+    .map((s) => {
+      const v = projectShotsLegacy.get(s.id);
+      return isReference ? v?.referenceVideoUrl : v?.videoUrl;
+    })
     .filter(Boolean) as string[];
 
   if (videoPaths.length === 0) {
@@ -2420,7 +2378,10 @@ async function handleVideoAssembleSync(projectId: string, payload?: Record<strin
 
   // Build transitions array from shot transitionOut / transitionIn fields
   type TransitionType = "cut" | "dissolve" | "fade_in" | "fade_out" | "wipeleft" | "slideright" | "circleopen";
-  const completedShots = projectShots.filter((s) => isReference ? s.referenceVideoUrl : s.videoUrl);
+  const completedShots = projectShots.filter((s) => {
+    const v = projectShotsLegacy.get(s.id);
+    return isReference ? v?.referenceVideoUrl : v?.videoUrl;
+  });
   const transitions: TransitionType[] = completedShots.slice(0, -1).map((shot, i) => {
     const nextShot = completedShots[i + 1];
     return ((shot.transitionOut && shot.transitionOut !== "cut")
@@ -2511,6 +2472,7 @@ async function handleSingleVideoPrompt(
 
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId)).limit(1);
   if (!shot) return NextResponse.json({ error: "Shot not found" }, { status: 404 });
+  const shotView = await loadShotLegacyView(shot.id);
 
   // Determine generation mode to decide which frames to pass
   let genMode = "keyframe";
@@ -2526,11 +2488,11 @@ async function handleSingleVideoPrompt(
   // Reference mode: pass only the scene reference frame
   const visionFrames: string[] = [];
   if (genMode === "reference") {
-    if (shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
+    if (shotView.sceneRefFrame) visionFrames.push(shotView.sceneRefFrame);
   } else {
-    if (shot.firstFrame) visionFrames.push(shot.firstFrame);
-    if (shot.lastFrame) visionFrames.push(shot.lastFrame);
-    if (visionFrames.length === 0 && shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
+    if (shotView.firstFrame) visionFrames.push(shotView.firstFrame);
+    if (shotView.lastFrame) visionFrames.push(shotView.lastFrame);
+    if (visionFrames.length === 0 && shotView.sceneRefFrame) visionFrames.push(shotView.sceneRefFrame);
   }
   console.log(`[SingleVideoPrompt] shot.sequence=${shot.sequence}, mode=${genMode}, frames=${visionFrames.length}`);
   if (visionFrames.length === 0) {
@@ -2546,12 +2508,12 @@ async function handleSingleVideoPrompt(
   const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
   const onScreenDialogueChars = shotDialogues
     .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-  
+    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shotView.startFrameDesc));
+
   const dialogueList = shotDialogues.map((d) => {
     const char = shotCharacters.find((c) => c.id === d.characterId);
     const characterName = char?.name ?? "Unknown";
-    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotView.startFrameDesc);
     const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
     return {
       characterName,
@@ -2605,11 +2567,15 @@ async function handleBatchVideoPrompt(
   if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
   if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
   const batchShots = await db.select().from(shots).where(and(...shotWhereConditions)).orderBy(asc(shots.sequence));
+  const batchShotsLegacy = await loadShotLegacyViewsBatch(batchShots.map((s) => s.id));
 
   const batchCharacters = await getEpisodeCharacters(projectId, episodeId);
 
   // Only process shots that have frames
-  const eligible = batchShots.filter((s) => s.firstFrame || s.lastFrame || s.sceneRefFrame);
+  const eligible = batchShots.filter((s) => {
+    const v = batchShotsLegacy.get(s.id);
+    return v?.firstFrame || v?.lastFrame || v?.sceneRefFrame;
+  });
 
   // Determine generation mode for frame selection
   let batchGenMode = "keyframe";
@@ -2631,16 +2597,17 @@ async function handleBatchVideoPrompt(
   const results = await Promise.all(
     eligible.map(async (shot) => {
       try {
+        const shotLegacy = batchShotsLegacy.get(shot.id);
         const shotStart = Date.now();
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
         // Keyframe: pass first + last frames; Reference: pass only scene ref frame
         const visionFrames: string[] = [];
         if (batchGenMode === "reference") {
-          if (shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
+          if (shotLegacy?.sceneRefFrame) visionFrames.push(shotLegacy.sceneRefFrame);
         } else {
-          if (shot.firstFrame) visionFrames.push(shot.firstFrame);
-          if (shot.lastFrame) visionFrames.push(shot.lastFrame);
-          if (visionFrames.length === 0 && shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
+          if (shotLegacy?.firstFrame) visionFrames.push(shotLegacy.firstFrame);
+          if (shotLegacy?.lastFrame) visionFrames.push(shotLegacy.lastFrame);
+          if (visionFrames.length === 0 && shotLegacy?.sceneRefFrame) visionFrames.push(shotLegacy.sceneRefFrame);
         }
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
@@ -2652,7 +2619,7 @@ async function handleBatchVideoPrompt(
         const dialogueList = shotDialogues.map((d) => {
           const char = batchCharacters.find((c) => c.id === d.characterId);
           const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shotLegacy?.startFrameDesc ?? null);
           const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
           return {
             characterName,
@@ -2795,9 +2762,10 @@ async function handleBatchRefImageGenerate(
     failed: number;
   }> = [];
 
+  const allShotsLegacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
   for (const shot of allShots) {
-    const refImages = parseRefImages(shot.referenceImages as string);
-    const pending = refImages.filter((r) => r.type === "reference" && r.status === "pending" && r.prompt.trim());
+    const refImages = allShotsLegacy.get(shot.id)?.referenceImages ?? [];
+    const pending = refImages.filter((r) => r.status === "pending" && r.prompt.trim());
 
     if (pending.length === 0) {
       results.push({ shotId: shot.id, sequence: shot.sequence, generated: 0, failed: 0 });
@@ -2828,23 +2796,18 @@ async function handleBatchRefImageGenerate(
           ...batchImageOpts,
           referenceImages: entryCharRefs,
         });
-        const updated = appendToHistory(entry, imagePath);
-        entry.imagePath = updated.imagePath;
-        entry.status = updated.status;
-        entry.history = updated.history;
+        await insertAssetVersion({
+          shotId: shot.id, type: "reference", sequenceInType: entry.sequenceInType,
+          prompt: entry.prompt, fileUrl: imagePath, status: "completed",
+          characters: entry.characters ?? undefined,
+        });
         generated++;
-        console.log(`[BatchRefImage] Shot ${shot.sequence}: generated ref image "${entry.id}" (history: ${entry.history?.length})`);
+        console.log(`[BatchRefImage] Shot ${shot.sequence}: generated ref image "${entry.id}"`);
       } catch (err) {
         failed++;
         console.warn(`[BatchRefImage] Shot ${shot.sequence}: failed ref image "${entry.id}":`, err);
       }
     }
-
-    // Save updated ref images back to shot
-    await db
-      .update(shots)
-      .set({ referenceImages: serializeRefImages(refImages) })
-      .where(eq(shots.id, shot.id));
 
     results.push({ shotId: shot.id, sequence: shot.sequence, generated, failed });
   }
@@ -2875,7 +2838,8 @@ async function handleSingleRefImageGenerate(
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
 
-  const refImages = parseRefImages(shot.referenceImages as string);
+  const shotView = await loadShotLegacyView(shot.id);
+  const refImages = shotView.referenceImages;
   const entry = refImages.find((r) => r.id === refImageId);
   if (!entry) {
     return NextResponse.json({ error: "Reference image not found" }, { status: 404 });
@@ -2884,8 +2848,8 @@ async function handleSingleRefImageGenerate(
     return NextResponse.json({ error: "No prompt provided" }, { status: 400 });
   }
 
-  // Use pre-stored character names from ref prompt generation
-  const projectCharacters = await getEpisodeCharacters(projectId);
+  // Scope characters to the shot's episode
+  const projectCharacters = await getEpisodeCharacters(projectId, shot.episodeId);
   const charsWithRefs = projectCharacters.filter((c) => !!c.referenceImage);
   const storedCharNames = entry.characters || [];
   const relevantChars = storedCharNames.length > 0
@@ -2910,17 +2874,11 @@ async function handleSingleRefImageGenerate(
       referenceImages: charRefs,
     });
 
-    // Re-read shot to avoid race condition with other concurrent updates
-    const [latestShot] = await db.select().from(shots).where(eq(shots.id, shotId));
-    const latestRefImages = parseRefImages(latestShot?.referenceImages as string);
-    const idx = latestRefImages.findIndex((r) => r.id === refImageId);
-    if (idx >= 0) {
-      latestRefImages[idx] = appendToHistory(latestRefImages[idx], imagePath);
-      await db
-        .update(shots)
-        .set({ referenceImages: serializeRefImages(latestRefImages) })
-        .where(eq(shots.id, shotId));
-    }
+    await insertAssetVersion({
+      shotId, type: "reference", sequenceInType: entry.sequenceInType,
+      prompt: entry.prompt, fileUrl: imagePath, status: "completed",
+      characters: entry.characters ?? undefined,
+    });
 
     return NextResponse.json({ ok: true, imagePath });
   } catch (err) {
@@ -2958,73 +2916,110 @@ async function handleGenerateRefPrompts(
 
   const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
 
-  // Get visual style from script
+  // Get visual style from script — parse the fixed machine-readable meta block
+  // (see src/lib/ai/prompts/script-generate.ts VISUAL STYLE section)
   const scriptSource = episodeId
     ? await db.select({ script: episodes.script }).from(episodes).where(eq(episodes.id, episodeId))
     : await db.select({ script: projects.script }).from(projects).where(eq(projects.id, projectId));
   const script = scriptSource[0]?.script || "";
-  const visualStyleMatch = script.match(/视觉风格[：:]\s*(.+?)(?:\n|$)/) || script.match(/Visual Style[：:]\s*(.+?)(?:\n|$)/i);
-  const visualStyle = visualStyleMatch?.[1] || "";
+
+  const pickField = (label: string): string => {
+    const re = new RegExp(`${label}[：:]\\s*(.+?)(?:\\n|$)`);
+    const m = script.match(re);
+    return m?.[1]?.trim() || "";
+  };
+  const metaVisualStyle = pickField("视觉风格") || pickField("Visual Style");
+  const metaColorTone = pickField("色彩基调");
+  const metaEra = pickField("时代美学");
+  const metaMood = pickField("氛围情绪");
+  const metaRatio = pickField("画幅比例");
+  const metaDirector = pickField("参考导演");
+
+  // Compose a richer visual style string for downstream ref-image prompt generation.
+  // Keeps backward compatibility: if only 视觉风格 is present, behavior is unchanged.
+  const visualStyle = [
+    metaVisualStyle,
+    metaColorTone && `色彩基调：${metaColorTone}`,
+    metaEra && `时代美学：${metaEra}`,
+    metaMood && `氛围情绪：${metaMood}`,
+    metaRatio && `画幅比例：${metaRatio}`,
+    metaDirector && metaDirector !== "无" && metaDirector !== "None" && `参考导演：${metaDirector}`,
+  ].filter(Boolean).join("；");
 
   const textProvider = resolveAIProvider(modelConfig);
-  const promptRequest = buildRefImagePromptsRequest(
-    allShots.map((s) => ({
-      sequence: s.sequence,
-      prompt: s.prompt || "",
-      motionScript: s.motionScript,
-      cameraDirection: s.cameraDirection,
-    })),
-    projectCharacters.map((c) => ({ name: c.name, description: c.description })),
-    visualStyle
+  const refImageSystem = await resolvePrompt("ref_image_prompts", { userId, projectId });
+  const { deleteAssetsByType } = await import("@/lib/shot-asset-utils");
+
+  // Concurrent per-shot generation: each shot is a separate LLM call so they
+  // run in parallel via Promise.all. Token-heavier than one big call but
+  // dramatically faster (≈ N×) and resilient to a single shot failing.
+  const total = allShots.length;
+  let doneCount = 0;
+  console.log(`[GenerateRefPrompts] Starting concurrent generation: 0/${total}`);
+  const results = await Promise.allSettled(
+    allShots.map(async (shot) => {
+      try {
+        const promptRequest = buildRefImagePromptsRequest(
+          [{
+            sequence: shot.sequence,
+            prompt: shot.prompt || "",
+            motionScript: shot.motionScript,
+            cameraDirection: shot.cameraDirection,
+          }],
+          projectCharacters.map((c) => ({ name: c.name, description: c.description })),
+          visualStyle
+        );
+
+        const result = await textProvider.generateText(promptRequest, {
+          systemPrompt: refImageSystem,
+          temperature: 0.7,
+        });
+
+        const jsonMatch = result.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          throw new Error(`Shot ${shot.sequence}: invalid JSON response`);
+        }
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{
+          shotSequence: number;
+          characters?: string[];
+          prompts: string[];
+        }>;
+        const entry = parsed.find((e) => e.shotSequence === shot.sequence) || parsed[0];
+        if (!entry || !Array.isArray(entry.prompts) || entry.prompts.length === 0) {
+          throw new Error(`Shot ${shot.sequence}: empty prompts`);
+        }
+
+        const shotCharacters = entry.characters || projectCharacters.map((c) => c.name);
+        await deleteAssetsByType(shot.id, "reference");
+        for (let pi = 0; pi < entry.prompts.length; pi++) {
+          await insertAssetVersion({
+            shotId: shot.id,
+            type: "reference",
+            sequenceInType: pi,
+            prompt: entry.prompts[pi],
+            status: "pending",
+            characters: shotCharacters,
+          });
+        }
+        doneCount++;
+        console.log(`[GenerateRefPrompts] ✓ shot ${shot.sequence} (${doneCount}/${total})`);
+        return shot.sequence;
+      } catch (err) {
+        doneCount++;
+        console.warn(`[GenerateRefPrompts] ✗ shot ${shot.sequence} (${doneCount}/${total}): ${String(err)}`);
+        throw err;
+      }
+    })
   );
 
-  const refImageSystem = await resolvePrompt("ref_image_prompts", { userId, projectId });
-
-  const result = await textProvider.generateText(promptRequest, {
-    systemPrompt: refImageSystem,
-    temperature: 0.7,
-  });
-
-  // Parse AI response — extract JSON array
-  const jsonMatch = result.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    console.error("[GenerateRefPrompts] AI response not valid JSON:", result.substring(0, 200));
-    return NextResponse.json({ error: "AI did not return valid JSON" }, { status: 500 });
+  const updatedCount = results.filter((r) => r.status === "fulfilled").length;
+  const failed = results
+    .map((r, i) => (r.status === "rejected" ? { seq: allShots[i].sequence, err: String(r.reason) } : null))
+    .filter(Boolean);
+  if (failed.length > 0) {
+    console.warn(`[GenerateRefPrompts] ${failed.length} shots failed:`, failed);
   }
-
-  const parsed = JSON.parse(jsonMatch[0]) as Array<{
-    shotSequence: number;
-    characters?: string[];
-    prompts: string[];
-  }>;
-
-  // Update each shot's referenceImages with the generated prompts + character list
-  let updatedCount = 0;
-  for (const entry of parsed) {
-    const shot = allShots.find((s) => s.sequence === entry.shotSequence);
-    if (!shot || !entry.prompts?.length) continue;
-
-    const shotCharacters = entry.characters || [];
-    const newRefImages: RefImage[] = entry.prompts.map((p) => ({
-      id: genId(),
-      type: "reference" as const,
-      prompt: p,
-      status: "pending" as const,
-      characters: shotCharacters,
-    }));
-
-    // Preserve existing first_frame/last_frame items, replace only reference items
-    const existing = parseRefImages(shot.referenceImages as string);
-    const frameItems = existing.filter((r) => r.type === "first_frame" || r.type === "last_frame");
-
-    await db
-      .update(shots)
-      .set({ referenceImages: serializeRefImages([...frameItems, ...newRefImages]) })
-      .where(eq(shots.id, shot.id));
-    updatedCount++;
-  }
-
-  console.log(`[GenerateRefPrompts] Updated ${updatedCount}/${allShots.length} shots with ref image prompts`);
+  console.log(`[GenerateRefPrompts] Updated ${updatedCount}/${allShots.length} shots (concurrent)`);
   return NextResponse.json({ updatedCount, totalShots: allShots.length });
 }
 
@@ -3042,14 +3037,16 @@ async function handleSingleShotRefImageGenerateAll(
 
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot) return NextResponse.json({ error: "Shot not found" }, { status: 404 });
+  const shotView = await loadShotLegacyView(shot.id);
 
-  const refImages = parseRefImages(shot.referenceImages as string);
-  const pending = refImages.filter((r) => r.type === "reference" && r.status === "pending" && r.prompt.trim());
+  const refImages = shotView.referenceImages;
+  const pending = refImages.filter((r) => r.status === "pending" && r.prompt.trim());
   if (pending.length === 0) {
     return NextResponse.json({ message: "No pending ref images", generated: 0 });
   }
 
-  const projectCharacters = await getEpisodeCharacters(projectId);
+  // Scope characters to the shot's episode (or fall back to project-wide if shot has no episode)
+  const projectCharacters = await getEpisodeCharacters(projectId, shot.episodeId);
   const charsWithRefs = projectCharacters.filter((c) => !!c.referenceImage);
 
   // Use pre-stored character names from ref prompt generation (no AI matching needed)
@@ -3077,27 +3074,155 @@ async function handleSingleShotRefImageGenerateAll(
         ...imgOpts,
         referenceImages: charRefsForShot,
       });
-      const updated = appendToHistory(entry, imagePath);
-      entry.imagePath = updated.imagePath;
-      entry.status = updated.status;
-      entry.history = updated.history;
+      await insertAssetVersion({
+        shotId, type: "reference", sequenceInType: entry.sequenceInType,
+        prompt: entry.prompt, fileUrl: imagePath, status: "completed",
+        characters: entry.characters ?? undefined,
+      });
       generated++;
-      console.log(`[RefImageGenAll] Shot ${shot.sequence}: generated ref "${entry.id}" (history: ${entry.history?.length})`);
+      console.log(`[RefImageGenAll] Shot ${shot.sequence}: generated ref "${entry.id}"`);
     } catch (err) {
       console.warn(`[RefImageGenAll] Shot ${shot.sequence} ref ${entry.id} failed:`, err);
     }
   }
 
-  // Set sceneRefFrame to first generated image (for video gen compatibility)
-  const firstGenerated = refImages.find((r) => r.status === "generated" && r.imagePath);
-
-  await db
-    .update(shots)
-    .set({
-      referenceImages: serializeRefImages(refImages),
-      ...(firstGenerated?.imagePath ? { sceneRefFrame: firstGenerated.imagePath } : {}),
-    })
-    .where(eq(shots.id, shotId));
-
   return NextResponse.json({ generated, total: pending.length });
+}
+
+// --- generate_keyframe_prompts: synchronous batch — AI generates first/last
+// frame prompts for all shots in one call, writes them into shot_assets ---
+
+async function handleGenerateKeyframePrompts(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string
+) {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  const batchVersionId = payload?.versionId as string | undefined;
+  const shotWhereConditions = [eq(shots.projectId, projectId)];
+  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
+  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
+
+  const allShots = await db
+    .select()
+    .from(shots)
+    .where(and(...shotWhereConditions))
+    .orderBy(asc(shots.sequence));
+
+  if (allShots.length === 0) {
+    return NextResponse.json({ error: "No shots found" }, { status: 400 });
+  }
+
+  const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
+
+  // Pull visual style meta from script (same regex as ref prompts handler)
+  const scriptSource = episodeId
+    ? await db.select({ script: episodes.script }).from(episodes).where(eq(episodes.id, episodeId))
+    : await db.select({ script: projects.script }).from(projects).where(eq(projects.id, projectId));
+  const script = scriptSource[0]?.script || "";
+
+  const pickField = (label: string): string => {
+    const re = new RegExp(`${label}[：:]\\s*(.+?)(?:\\n|$)`);
+    const m = script.match(re);
+    return m?.[1]?.trim() || "";
+  };
+  const visualStyle = [
+    pickField("视觉风格") || pickField("Visual Style"),
+    pickField("色彩基调") && `色彩基调：${pickField("色彩基调")}`,
+    pickField("时代美学") && `时代美学：${pickField("时代美学")}`,
+    pickField("氛围情绪") && `氛围情绪：${pickField("氛围情绪")}`,
+    pickField("画幅比例") && `画幅比例：${pickField("画幅比例")}`,
+  ].filter(Boolean).join("；");
+
+  const textProvider = resolveAIProvider(modelConfig);
+  const keyframeSystemPrompt = await resolvePrompt("shot_split_keyframe_assets", {
+    userId,
+    projectId,
+  });
+
+  // Concurrent per-shot generation: each shot is one LLM call, all run in parallel.
+  const total = allShots.length;
+  let doneCount = 0;
+  console.log(`[GenerateKeyframePrompts] Starting concurrent generation: 0/${total}`);
+  const results = await Promise.allSettled(
+    allShots.map(async (shot) => {
+      try {
+        const promptRequest = buildKeyframePromptsRequest(
+          [{
+            sequence: shot.sequence,
+            prompt: shot.prompt || "",
+            motionScript: shot.motionScript,
+            cameraDirection: shot.cameraDirection,
+          }],
+          projectCharacters.map((c) => ({
+            name: c.name,
+            description: c.description,
+            visualHint: c.visualHint,
+          })),
+          visualStyle
+        );
+
+        const result = await textProvider.generateText(promptRequest, {
+          systemPrompt: keyframeSystemPrompt,
+          temperature: 0.5,
+        });
+
+        const jsonMatch = result.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          throw new Error(`Shot ${shot.sequence}: invalid JSON response`);
+        }
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{
+          shotSequence: number;
+          characters?: string[];
+          prompts: string[];
+        }>;
+        const entry = parsed.find((e) => e.shotSequence === shot.sequence) || parsed[0];
+        if (!entry || !Array.isArray(entry.prompts) || entry.prompts.length < 2) {
+          throw new Error(`Shot ${shot.sequence}: expected 2 prompts (first/last frame)`);
+        }
+
+        // Use LLM-provided per-shot character list (only visible chars in this shot).
+        // Fall back to empty array if LLM omitted the field — never default to all chars.
+        const charsForShot = Array.isArray(entry.characters) ? entry.characters : [];
+        await insertAssetVersion({
+          shotId: shot.id,
+          type: "first_frame",
+          sequenceInType: 0,
+          prompt: entry.prompts[0],
+          status: "pending",
+          characters: charsForShot,
+        });
+        await insertAssetVersion({
+          shotId: shot.id,
+          type: "last_frame",
+          sequenceInType: 0,
+          prompt: entry.prompts[1],
+          status: "pending",
+          characters: charsForShot,
+        });
+        doneCount++;
+        console.log(`[GenerateKeyframePrompts] ✓ shot ${shot.sequence} (${doneCount}/${total})`);
+        return shot.sequence;
+      } catch (err) {
+        doneCount++;
+        console.warn(`[GenerateKeyframePrompts] ✗ shot ${shot.sequence} (${doneCount}/${total}): ${String(err)}`);
+        throw err;
+      }
+    })
+  );
+
+  const updatedCount = results.filter((r) => r.status === "fulfilled").length;
+  const failed = results
+    .map((r, i) => (r.status === "rejected" ? { seq: allShots[i].sequence, err: String(r.reason) } : null))
+    .filter(Boolean);
+  if (failed.length > 0) {
+    console.warn(`[GenerateKeyframePrompts] ${failed.length} shots failed:`, failed);
+  }
+  console.log(`[GenerateKeyframePrompts] Updated ${updatedCount}/${allShots.length} shots (concurrent)`);
+  return NextResponse.json({ updatedCount, totalShots: allShots.length });
 }

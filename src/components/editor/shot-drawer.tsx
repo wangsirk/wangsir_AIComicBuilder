@@ -20,30 +20,18 @@ import {
   RefreshCw,
   Clock,
 } from "lucide-react";
+import {
+  type Shot,
+  getFirstFrameUrl,
+  getLastFrameUrl,
+  getSceneRefFrameUrl,
+  getKeyframeVideoUrl,
+  getReferenceVideoUrl,
+  getFirstFramePrompt,
+  getLastFramePrompt,
+} from "@/stores/project-store";
 
-interface Dialogue {
-  id: string;
-  text: string;
-  characterName: string;
-}
-
-interface DrawerShot {
-  id: string;
-  sequence: number;
-  prompt: string;
-  startFrameDesc: string | null;
-  endFrameDesc: string | null;
-  videoScript: string | null;
-  motionScript: string | null;
-  cameraDirection: string;
-  duration: number;
-  firstFrame: string | null;
-  lastFrame: string | null;
-  sceneRefFrame?: string | null;
-  videoPrompt?: string | null;
-  videoUrl: string | null;
-  dialogues: Dialogue[];
-}
+type DrawerShot = Shot;
 
 interface ShotDrawerProps {
   shots: DrawerShot[];
@@ -100,8 +88,8 @@ export function ShotDrawer({
   useEffect(() => {
     if (!shot) return;
     setEditPrompt(shot.prompt ?? "");
-    setEditStartFrame(shot.startFrameDesc ?? "");
-    setEditEndFrame(shot.endFrameDesc ?? "");
+    setEditStartFrame(getFirstFramePrompt(shot) ?? "");
+    setEditEndFrame(getLastFramePrompt(shot) ?? "");
     setEditMotionScript(shot.motionScript ?? "");
     setEditVideoPrompt(shot.videoPrompt ?? "");
     setEditCameraDirection(shot.cameraDirection ?? "static");
@@ -127,10 +115,14 @@ export function ShotDrawer({
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < shots.length - 1;
 
-  const hasFrame = !!(shot.sceneRefFrame || shot.firstFrame || shot.lastFrame);
-  const hasFramePair = !!(shot.firstFrame && shot.lastFrame);
+  const firstFrameUrl = getFirstFrameUrl(shot);
+  const lastFrameUrl = getLastFrameUrl(shot);
+  const sceneRefFrameUrl = getSceneRefFrameUrl(shot);
+  const resolvedVideoUrl = generationMode === "reference" ? getReferenceVideoUrl(shot) : getKeyframeVideoUrl(shot);
+  const hasFrame = !!(sceneRefFrameUrl || firstFrameUrl || lastFrameUrl);
+  const hasFramePair = !!(firstFrameUrl && lastFrameUrl);
   const hasVideoPrompt = !!shot.videoPrompt;
-  const hasVideo = !!shot.videoUrl;
+  const hasVideo = !!resolvedVideoUrl;
   const localGenerating = generatingFrames || generatingSceneFrame || generatingVideo || generatingPrompt || rewritingText;
 
   async function patchShot(fields: Record<string, unknown>) {
@@ -250,10 +242,10 @@ export function ShotDrawer({
   }
 
   const frameAssets = generationMode === "reference"
-    ? [{ src: shot.sceneRefFrame, label: t("shot.sceneRefFrame") }]
+    ? [{ src: sceneRefFrameUrl, label: t("shot.sceneRefFrame") }]
     : [
-        { src: shot.firstFrame, label: t("shot.firstFrame") },
-        { src: shot.lastFrame, label: t("shot.lastFrame") },
+        { src: firstFrameUrl, label: t("shot.firstFrame") },
+        { src: lastFrameUrl, label: t("shot.lastFrame") },
       ];
 
   return (
@@ -458,9 +450,9 @@ export function ShotDrawer({
               <div
                 className="group relative mb-2 overflow-hidden rounded-xl border border-[--border-subtle] bg-black cursor-pointer"
                 style={{ aspectRatio: "16/9" }}
-                onClick={() => setPreviewSrc(uploadUrl(shot.videoUrl!))}
+                onClick={() => setPreviewSrc(uploadUrl(resolvedVideoUrl!))}
               >
-                <video className="h-full w-full object-contain" src={uploadUrl(shot.videoUrl!)} />
+                <video className="h-full w-full object-contain" src={uploadUrl(resolvedVideoUrl!)} />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow-lg">
                     <VideoIcon className="h-4 w-4 text-[--text-primary] translate-x-0.5" />

@@ -123,6 +123,59 @@ export const scenes = sqliteTable("scenes", {
     .$defaultFn(() => new Date()),
 });
 
+/**
+ * Unified per-shot asset table.
+ * One row = one generated artifact (image prompt+file, or video file) bound
+ * to a specific shot via shot_id. The `type` column discriminates which
+ * generation mode it belongs to:
+ *   - 'first_frame' / 'last_frame'  → keyframe mode image assets
+ *   - 'reference'                   → reference mode image assets
+ *   - 'keyframe_video'              → keyframe mode video output
+ *   - 'reference_video'             → reference mode video output
+ *
+ * Versioning: regenerating the same asset inserts a new row with
+ * (asset_version + 1, is_active=1) and flips the previous active row to
+ * is_active=0. Active row = "current"; older rows = history.
+ *
+ * Two modes coexist freely on the same shot — they live in different rows
+ * with different `type` values and never collide.
+ */
+export const shotAssets = sqliteTable("shot_assets", {
+  id: text("id").primaryKey(),
+  shotId: text("shot_id")
+    .notNull()
+    .references(() => shots.id, { onDelete: "cascade" }),
+  type: text("type", {
+    enum: [
+      "first_frame",
+      "last_frame",
+      "reference",
+      "keyframe_video",
+      "reference_video",
+    ],
+  }).notNull(),
+  sequenceInType: integer("sequence_in_type").notNull().default(0),
+  assetVersion: integer("asset_version").notNull().default(1),
+  isActive: integer("is_active").notNull().default(1),
+  prompt: text("prompt").notNull().default(""),
+  fileUrl: text("file_url"),
+  status: text("status", {
+    enum: ["pending", "generating", "completed", "failed"],
+  })
+    .notNull()
+    .default("pending"),
+  characters: text("characters"), // JSON array
+  modelProvider: text("model_provider"),
+  modelId: text("model_id"),
+  meta: text("meta"), // JSON
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const shots = sqliteTable("shots", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -130,17 +183,9 @@ export const shots = sqliteTable("shots", {
     .references(() => projects.id, { onDelete: "cascade" }),
   sequence: integer("sequence").notNull(),
   prompt: text("prompt").default(""),
-  startFrameDesc: text("start_frame_desc"),
-  endFrameDesc: text("end_frame_desc"),
   motionScript: text("motion_script"),
   cameraDirection: text("camera_direction").default("static"),
   duration: integer("duration").notNull().default(10),
-  firstFrame: text("first_frame"),
-  lastFrame: text("last_frame"),
-  videoUrl: text("video_url"),
-  referenceVideoUrl: text("reference_video_url"),
-  lastFrameUrl: text("last_frame_url"),
-  sceneRefFrame: text("scene_ref_frame"),
   videoScript: text("video_script"),
   videoPrompt: text("video_prompt"),
   transitionIn: text("transition_in").default("cut"),
@@ -158,7 +203,6 @@ export const shots = sqliteTable("shots", {
   soundDesign: text("sound_design").default(""),
   musicCue: text("music_cue").default(""),
   costumeOverrides: text("costume_overrides").default(""),
-  referenceImages: text("reference_images").default("[]"),
   isStale: integer("is_stale").notNull().default(0),
   status: text("status", {
     enum: ["pending", "generating", "completed", "failed"],

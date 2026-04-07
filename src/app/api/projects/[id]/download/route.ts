@@ -4,7 +4,7 @@ import { eq, asc } from "drizzle-orm";
 import archiver from "archiver";
 import path from "node:path";
 import fs from "node:fs";
-import { parseRefImages } from "@/lib/ref-image-utils";
+import { loadShotLegacyViewsBatch } from "@/lib/shot-asset-utils";
 
 export async function GET(
   _request: Request,
@@ -59,41 +59,38 @@ export async function GET(
     }
   }
 
-  // 2. Shot assets (all types)
+  // 2. Shot assets (all types) — read from unified shot_assets table
+  const legacyMap = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
   for (const shot of allShots) {
     const prefix = `shot-${String(shot.sequence).padStart(2, "0")}`;
+    const view = legacyMap.get(shot.id);
+    if (!view) continue;
 
-    // Keyframe mode assets
-    if (shot.firstFrame) {
-      const ext = path.extname(shot.firstFrame) || ".png";
-      addFile(shot.firstFrame, `${prefix}/first-frame${ext}`);
+    if (view.firstFrame) {
+      const ext = path.extname(view.firstFrame) || ".png";
+      addFile(view.firstFrame, `${prefix}/first-frame${ext}`);
     }
-    if (shot.lastFrame) {
-      const ext = path.extname(shot.lastFrame) || ".png";
-      addFile(shot.lastFrame, `${prefix}/last-frame${ext}`);
+    if (view.lastFrame) {
+      const ext = path.extname(view.lastFrame) || ".png";
+      addFile(view.lastFrame, `${prefix}/last-frame${ext}`);
     }
-    if (shot.videoUrl) {
-      const ext = path.extname(shot.videoUrl) || ".mp4";
-      addFile(shot.videoUrl, `${prefix}/video${ext}`);
+    if (view.videoUrl) {
+      const ext = path.extname(view.videoUrl) || ".mp4";
+      addFile(view.videoUrl, `${prefix}/video${ext}`);
     }
-
-    // Reference mode assets
-    if (shot.sceneRefFrame) {
-      const ext = path.extname(shot.sceneRefFrame) || ".png";
-      addFile(shot.sceneRefFrame, `${prefix}/scene-frame${ext}`);
+    if (view.sceneRefFrame) {
+      const ext = path.extname(view.sceneRefFrame) || ".png";
+      addFile(view.sceneRefFrame, `${prefix}/scene-frame${ext}`);
     }
-    if (shot.referenceVideoUrl) {
-      const ext = path.extname(shot.referenceVideoUrl) || ".mp4";
-      addFile(shot.referenceVideoUrl, `${prefix}/ref-video${ext}`);
+    if (view.referenceVideoUrl) {
+      const ext = path.extname(view.referenceVideoUrl) || ".mp4";
+      addFile(view.referenceVideoUrl, `${prefix}/ref-video${ext}`);
     }
-
-    // Reference images (multi-image mode)
-    const refItems = parseRefImages(shot.referenceImages as string);
     let refIdx = 1;
-    for (const ref of refItems) {
-      if (ref.type === "reference" && ref.imagePath) {
-        const ext = path.extname(ref.imagePath) || ".png";
-        addFile(ref.imagePath, `${prefix}/ref-${String(refIdx).padStart(2, "0")}${ext}`);
+    for (const ref of view.referenceImages) {
+      if (ref.fileUrl) {
+        const ext = path.extname(ref.fileUrl) || ".png";
+        addFile(ref.fileUrl, `${prefix}/ref-${String(refIdx).padStart(2, "0")}${ext}`);
         refIdx++;
       }
     }

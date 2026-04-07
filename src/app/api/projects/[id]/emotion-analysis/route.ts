@@ -36,7 +36,7 @@ export async function POST(
   const provider = resolveAIProvider(body.modelConfig);
 
   const shotsText = allShots
-    .map((s) => `Shot ${s.sequence}: ${s.prompt || s.startFrameDesc || ""}`)
+    .map((s) => `Shot ${s.sequence}: ${s.prompt || s.motionScript || ""}`)
     .join("\n");
 
   try {

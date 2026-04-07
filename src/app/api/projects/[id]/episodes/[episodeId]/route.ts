@@ -98,7 +98,24 @@ export async function GET(
         .orderBy(asc(shots.sequence))
     : [];
 
-  // Enrich each shot with its dialogues (including character name)
+  // Bulk-load ALL shot assets (all versions, not just active) so the UI
+  // can render version history arrows and switch between historical fileUrls.
+  const { shotAssets } = await import("@/lib/db/schema");
+  const { desc: descOrder } = await import("drizzle-orm");
+  const assetRows = episodeShots.length
+    ? await db
+        .select()
+        .from(shotAssets)
+        .where(inArray(shotAssets.shotId, episodeShots.map((s) => s.id)))
+        .orderBy(shotAssets.type, shotAssets.sequenceInType, descOrder(shotAssets.assetVersion))
+    : [];
+  const assetsByShot = new Map<string, typeof assetRows>();
+  for (const row of assetRows) {
+    if (!assetsByShot.has(row.shotId)) assetsByShot.set(row.shotId, []);
+    assetsByShot.get(row.shotId)!.push(row);
+  }
+
+  // Enrich each shot with its dialogues + active asset rows
   const enrichedShots = await Promise.all(
     episodeShots.map(async (shot) => {
       const shotDialogues = await db
@@ -113,7 +130,21 @@ export async function GET(
         .innerJoin(characters, eq(dialogues.characterId, characters.id))
         .where(eq(dialogues.shotId, shot.id))
         .orderBy(asc(dialogues.sequence));
-      return { ...shot, dialogues: shotDialogues };
+      const assets = (assetsByShot.get(shot.id) ?? []).map((a) => ({
+        id: a.id,
+        shotId: a.shotId,
+        type: a.type,
+        sequenceInType: a.sequenceInType,
+        assetVersion: a.assetVersion,
+        isActive: a.isActive,
+        prompt: a.prompt,
+        fileUrl: a.fileUrl,
+        status: a.status,
+        characters: a.characters ? JSON.parse(a.characters) : null,
+        modelProvider: a.modelProvider,
+        modelId: a.modelId,
+      }));
+      return { ...shot, dialogues: shotDialogues, assets };
     })
   );
 

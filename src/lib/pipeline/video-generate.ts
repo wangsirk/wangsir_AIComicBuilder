@@ -9,6 +9,7 @@ import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { eq } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
+import { getActiveAsset, insertAssetVersion } from "@/lib/shot-asset-utils";
 
 async function getVersionedUploadDirFromPipeline(versionId: string | null | undefined): Promise<string> {
   if (!versionId) return process.env.UPLOAD_DIR || "./uploads";
@@ -29,7 +30,15 @@ export async function handleVideoGenerate(task: Task) {
     .where(eq(shots.id, payload.shotId));
 
   if (!shot) throw new Error("Shot not found");
-  if (!shot.firstFrame || !shot.lastFrame) {
+
+  // Read first/last frame URL from shot_assets
+  const firstFrameAsset = await getActiveAsset(payload.shotId, "first_frame", 0);
+  const lastFrameAsset = await getActiveAsset(payload.shotId, "last_frame", 0);
+
+  const firstFrameUrl = firstFrameAsset?.fileUrl;
+  const lastFrameUrl = lastFrameAsset?.fileUrl;
+
+  if (!firstFrameUrl || !lastFrameUrl) {
     throw new Error("Shot frames not generated yet");
   }
 
@@ -58,33 +67,34 @@ export async function handleVideoGenerate(task: Task) {
   const prompt = buildVideoPrompt({
     videoScript,
     cameraDirection: shot.cameraDirection || "static",
-    startFrameDesc: shot.startFrameDesc ?? undefined,
-    endFrameDesc: shot.endFrameDesc ?? undefined,
+    startFrameDesc: firstFrameAsset?.prompt ?? undefined,
+    endFrameDesc: lastFrameAsset?.prompt ?? undefined,
     duration: effectiveDuration,
     characters: projectCharacters,
     slotContents: videoSlots,
   });
 
   const result = await videoProvider.generateVideo({
-    firstFrame: shot.firstFrame,
-    lastFrame: shot.lastFrame,
+    firstFrame: firstFrameUrl,
+    lastFrame: lastFrameUrl,
     prompt,
     duration: effectiveDuration,
     ratio: payload.ratio ?? "16:9",
   });
 
-  // Track video history in referenceImages
-  const { parseRefImages, serializeRefImages, trackMediaHistory } = await import("@/lib/ref-image-utils");
-  const refsForVideo = parseRefImages(shot.referenceImages as string);
-  const updatedForVideo = trackMediaHistory(refsForVideo, "video", result.filePath);
+  // Persist the keyframe video output as a new versioned asset row.
+  await insertAssetVersion({
+    shotId: payload.shotId,
+    type: "keyframe_video",
+    sequenceInType: 0,
+    prompt,
+    fileUrl: result.filePath,
+    status: "completed",
+  });
 
   await db
     .update(shots)
-    .set({
-      videoUrl: result.filePath,
-      referenceImages: serializeRefImages(updatedForVideo),
-      status: "completed",
-    })
+    .set({ status: "completed" })
     .where(eq(shots.id, payload.shotId));
 
   // Best-effort video quality check — does not block or fail generation
@@ -94,7 +104,7 @@ export async function handleVideoGenerate(task: Task) {
       const qualityResult = await checkVideoQuality(
         textProvider,
         result.filePath,
-        shot.firstFrame || undefined
+        firstFrameUrl
       );
 
       console.log(

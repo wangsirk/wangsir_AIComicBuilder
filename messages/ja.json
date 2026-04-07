@@ -163,6 +163,8 @@
     "addRefImage": "参照を追加",
     "refImagePrompt": "参照画像のプロンプト...",
     "noRefImages": "参照画像のプロンプトがありません",
+    "noKeyframes": "キーフレームのプロンプトがありません",
+    "refChars": "ショット内キャラクター",
     "generateRefImages": "参照画像を生成",
     "regenerateRefImages": "参照画像を再生成",
     "maxRefImages": "最大9枚の参照画像",
@@ -323,7 +325,11 @@
       "refImagePromptsDesc": "ストーリーボードから各ショットの参考画像プロンプトを生成",
       "videoGenerate": "動画生成",
       "refVideoGenerate": "参照動画生成",
-      "refVideoPrompt": "動画プロンプト生成"
+      "refVideoPrompt": "動画プロンプト生成",
+      "shotSplitKeyframeAssets": "ショット·キーフレーム提示語",
+      "shotSplitKeyframeAssetsDesc": "既存のショットメタデータから先頭/末尾フレームの画像生成プロンプトを生成",
+      "shotSplitReferenceAssets": "ショット·参照画像提示語",
+      "shotSplitReferenceAssetsDesc": "既存のショットメタデータから参照画像の画像生成プロンプトを生成"
     },
     "editor": {
       "slotMode": "スロット",
@@ -470,7 +476,15 @@
       "compositionRules": "構図ルール",
       "compositionRulesDesc": "シーン構図とレイアウト要件",
       "rendering": "レンダリング品質",
-      "renderingDesc": "レンダリングとライティングの品質要件"
+      "renderingDesc": "レンダリングとライティングの品質要件",
+      "scriptFidelity": "脚本忠実度",
+      "scriptFidelityDesc": "ショットリストが脚本の物語内容を100％カバーする厳格な制約",
+      "originalFidelity": "原文忠実度",
+      "originalFidelityDesc": "セリフを逐字保持し、すべてのイベントを反映する厳格な制約",
+      "rules": "ルール",
+      "rulesDesc": "本プロンプトのコアルールセット",
+      "durationStrategy": "尺戦略",
+      "durationStrategyDesc": "ショット尺に応じた記述粒度のルール"
     }
   }
 }

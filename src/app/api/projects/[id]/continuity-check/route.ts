@@ -4,6 +4,7 @@ import { eq, asc } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { checkContinuity } from "@/lib/pipeline/continuity-check";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
+import { loadShotLegacyViewsBatch } from "@/lib/shot-asset-utils";
 
 export async function POST(
   req: Request,
@@ -12,22 +13,26 @@ export async function POST(
   const { id } = await params;
   const body = await req.json();
 
-  // Get all shots with frames, ordered by sequence
   const allShots = await db
     .select()
     .from(shots)
     .where(eq(shots.projectId, id))
     .orderBy(asc(shots.sequence));
 
-  const shotsWithFrames = allShots.filter(
-    (s: typeof allShots[number]) => s.lastFrame && s.firstFrame
-  );
+  const legacy = await loadShotLegacyViewsBatch(allShots.map((s) => s.id));
+
+  const shotsWithFrames = allShots
+    .map((s) => ({
+      sequence: s.sequence,
+      firstFrame: legacy.get(s.id)?.firstFrame ?? null,
+      lastFrame: legacy.get(s.id)?.lastFrame ?? null,
+    }))
+    .filter((s) => s.lastFrame && s.firstFrame);
 
   if (shotsWithFrames.length < 2) {
     return NextResponse.json({ results: [], message: "Need at least 2 shots with frames" });
   }
 
-  // Resolve text provider for vision analysis
   const provider = resolveAIProvider(body.modelConfig);
 
   const results: {

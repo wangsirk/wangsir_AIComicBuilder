@@ -4,18 +4,16 @@ import { useTranslations } from "next-intl";
 import { Loader2, ImageIcon, VideoIcon, Sparkles, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadUrl } from "@/lib/utils/upload-url";
+import {
+  type Shot,
+  getFirstFrameUrl,
+  getLastFrameUrl,
+  getSceneRefFrameUrl,
+  getKeyframeVideoUrl,
+  getReferenceVideoUrl,
+} from "@/stores/project-store";
 
-interface KanbanShot {
-  id: string;
-  sequence: number;
-  prompt: string;
-  firstFrame: string | null;
-  lastFrame: string | null;
-  sceneRefFrame: string | null;
-  videoPrompt: string | null;
-  /** Resolved video URL for the active generation mode (keyframe: videoUrl, reference: referenceVideoUrl). Must be pre-normalised by the caller. */
-  videoUrl: string | null;
-}
+type KanbanShot = Shot;
 
 interface ShotKanbanProps {
   shots: KanbanShot[];
@@ -47,10 +45,10 @@ interface KanbanColumn {
 function classifyShot(shot: KanbanShot, mode: "keyframe" | "reference") {
   // In reference mode, only sceneRefFrame counts as "has frame"
   const hasFrame = mode === "reference"
-    ? !!shot.sceneRefFrame
-    : !!(shot.firstFrame || shot.lastFrame);
+    ? !!getSceneRefFrameUrl(shot)
+    : !!(getFirstFrameUrl(shot) || getLastFrameUrl(shot));
   const hasVideoPrompt = !!shot.videoPrompt;
-  const hasVideo = !!shot.videoUrl;
+  const hasVideo = !!(mode === "reference" ? getReferenceVideoUrl(shot) : getKeyframeVideoUrl(shot));
   if (!hasFrame) return "frames";
   if (!hasVideoPrompt) return "prompt";
   if (!hasVideo) return "video";
@@ -170,7 +168,7 @@ export function ShotKanban({
               </div>
             ) : (
               col.shots.map((shot) => {
-                const thumb = shot.firstFrame || shot.sceneRefFrame || shot.lastFrame;
+                const thumb = getFirstFrameUrl(shot) || getSceneRefFrameUrl(shot) || getLastFrameUrl(shot);
                 return (
                   <div
                     key={shot.id}

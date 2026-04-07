@@ -1,6 +1,17 @@
 "use client";
 
-import { useProjectStore } from "@/stores/project-store";
+import {
+  useProjectStore,
+  getFirstFrameUrl,
+  getLastFrameUrl,
+  getSceneRefFrameUrl,
+  getKeyframeVideoUrl,
+  getReferenceVideoUrl,
+  getReferenceAssets,
+  hasKeyframePair,
+  getFirstFramePrompt,
+  getLastFramePrompt,
+} from "@/stores/project-store";
 import { useEpisodeStore } from "@/stores/episode-store";
 import { useModelStore } from "@/stores/model-store";
 import { ShotCard } from "@/components/editor/shot-card";
@@ -57,7 +68,6 @@ export default function EpisodeStoryboardPage() {
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
-  const [continueFromPrev, setContinueFromPrev] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{
     total: number;
     completed: number;
@@ -78,8 +88,6 @@ export default function EpisodeStoryboardPage() {
     }
   }, [project?.id, episodeStoreEpisodes.length, fetchEpisodes]);
 
-  const currentEpisodeSequence = episodeStoreEpisodes.find((e) => e.id === currentEpisodeId)?.sequence ?? 1;
-  const canContinueFromPrev = currentEpisodeSequence > 1;
 
   function switchView(mode: "list" | "kanban") {
     setViewMode(mode);
@@ -135,17 +143,15 @@ export default function EpisodeStoryboardPage() {
   if (!project) return null;
 
   const totalShots = project.shots.length;
-  const shotsWithFrames = project.shots.filter(
-    (s) => s.firstFrame && s.lastFrame
-  ).length;
+  const shotsWithFrames = project.shots.filter((s) => hasKeyframePair(s)).length;
   const generationMode = (project.generationMode || "keyframe") as "keyframe" | "reference";
   const shotsWithVideo = project.shots.filter((s) =>
-    generationMode === "reference" ? s.referenceVideoUrl : s.videoUrl
+    generationMode === "reference" ? getReferenceVideoUrl(s) : getKeyframeVideoUrl(s)
   ).length;
   const shotsWithVideoPrompts = project.shots.filter((s) => s.videoPrompt).length;
-  const shotsWithSceneFrames = project.shots.filter((s) => s.sceneRefFrame).length;
+  const shotsWithSceneFrames = project.shots.filter((s) => getSceneRefFrameUrl(s)).length;
   const shotsWithFrameAny = project.shots.filter(
-    (s) => s.sceneRefFrame || s.firstFrame || s.lastFrame
+    (s) => getSceneRefFrameUrl(s) || getFirstFrameUrl(s) || getLastFrameUrl(s)
   ).length;
   const charactersWithRefs = project.characters.filter((c) => c.referenceImage);
   const hasReferenceImages = charactersWithRefs.length > 0;
@@ -154,17 +160,11 @@ export default function EpisodeStoryboardPage() {
   const allRefImagesGenerated = useMemo(() => {
     if (generationMode !== "reference") return true;
     for (const shot of project.shots) {
-      try {
-        const refs = JSON.parse(shot.referenceImages || "[]");
-        // Only check reference-type items (ignore first_frame/last_frame items)
-        const refOnly = refs.filter((r: any) => typeof r === "object" && r.type === "reference");
-        // If shot has no reference items at all, skip blocking check
-        if (refOnly.length === 0) continue;
-        // Block if any reference item with prompt is still pending
-        if (refOnly.some((r: any) => r.status === "pending" && r.prompt)) {
-          return false;
-        }
-      } catch {}
+      const refOnly = getReferenceAssets(shot);
+      if (refOnly.length === 0) continue;
+      if (refOnly.some((r) => r.status !== "completed" && r.prompt)) {
+        return false;
+      }
     }
     return true;
   }, [project.shots, generationMode]);
@@ -172,44 +172,31 @@ export default function EpisodeStoryboardPage() {
   const shotsWithRefPrompts = useMemo(() => {
     if (!project) return 0;
     return project.shots.filter((s) => {
-      try {
-        const refs = JSON.parse(s.referenceImages || "[]");
-        const refOnly = refs.filter((r: any) => r.type === "reference");
-        return refOnly.length > 0 && refOnly.some((r: any) => r.prompt);
-      } catch { return false; }
+      const refOnly = getReferenceAssets(s);
+      return refOnly.length > 0 && refOnly.some((r) => r.prompt);
+    }).length;
+  }, [project?.shots]);
+
+  const shotsWithKeyframePrompts = useMemo(() => {
+    if (!project) return 0;
+    return project.shots.filter((s) => {
+      const ff = getFirstFramePrompt(s);
+      const lf = getLastFramePrompt(s);
+      return !!ff && !!lf;
     }).length;
   }, [project?.shots]);
 
   const shotsWithAllRefImages = useMemo(() => {
     if (!project) return 0;
     return project.shots.filter((s) => {
-      try {
-        const refs = JSON.parse(s.referenceImages || "[]");
-        const refOnly = refs.filter((r: any) => r.type === "reference");
-        return refOnly.length > 0 && refOnly.every((r: any) => r.status === "generated" && r.imagePath);
-      } catch { return false; }
+      const refOnly = getReferenceAssets(s);
+      return refOnly.length > 0 && refOnly.every((r) => r.status === "completed" && r.fileUrl);
     }).length;
   }, [project?.shots]);
 
   const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingRefImages || generatingVideoPrompts || generatingRefPrompts;
 
-  const drawerShots = project.shots.map((shot) => ({
-    id: shot.id,
-    sequence: shot.sequence,
-    prompt: shot.prompt,
-    startFrameDesc: shot.startFrameDesc,
-    endFrameDesc: shot.endFrameDesc,
-    videoScript: shot.videoScript,
-    motionScript: shot.motionScript,
-    cameraDirection: shot.cameraDirection,
-    duration: shot.duration,
-    firstFrame: shot.firstFrame,
-    lastFrame: shot.lastFrame,
-    sceneRefFrame: shot.sceneRefFrame,
-    videoPrompt: shot.videoPrompt,
-    videoUrl: generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl,
-    dialogues: shot.dialogues || [],
-  }));
+  const drawerShots = project.shots;
 
   async function handleGenerateShots() {
     if (!project) return;
@@ -251,7 +238,7 @@ export default function EpisodeStoryboardPage() {
     setGeneratingFrames(true);
     setLastBatchAction("batch_frame_generate");
 
-    const targets = project.shots.filter((s) => overwrite ? true : !s.firstFrame);
+    const targets = project.shots.filter((s) => overwrite ? true : !getFirstFrameUrl(s));
     setBatchProgress({ total: targets.length, completed: 0, failed: [] });
 
     try {
@@ -260,7 +247,7 @@ export default function EpisodeStoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_frame_generate",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, continueFromPrev },
+          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
           episodeId: useProjectStore.getState().currentEpisodeId,
         }),
@@ -295,7 +282,7 @@ export default function EpisodeStoryboardPage() {
     setGeneratingVideos(true);
     setLastBatchAction("batch_video_generate");
 
-    const targets = project.shots.filter((s) => overwrite ? true : !s.videoUrl);
+    const targets = project.shots.filter((s) => overwrite ? true : !getKeyframeVideoUrl(s));
     setBatchProgress({ total: targets.length, completed: 0, failed: [] });
 
     try {
@@ -339,7 +326,7 @@ export default function EpisodeStoryboardPage() {
     setGeneratingSceneFrames(true);
     setLastBatchAction("batch_scene_frame");
 
-    const targets = project.shots.filter((s) => overwrite ? true : !s.sceneRefFrame);
+    const targets = project.shots.filter((s) => overwrite ? true : !getSceneRefFrameUrl(s));
     setBatchProgress({ total: targets.length, completed: 0, failed: [] });
 
     try {
@@ -393,13 +380,44 @@ export default function EpisodeStoryboardPage() {
       });
       if (!resp.ok) throw new Error("Failed");
       const data = await resp.json();
-      toast.success(`Generated ref prompts for ${data.updatedCount} shots`);
+      toast.success(`已生成 ${data.updatedCount}/${data.totalShots} 个镜头的参考图提示词`);
       await fetchProject(project.id, currentEpisodeId || undefined);
     } catch (err) {
       toast.error("Failed to generate ref prompts");
       console.error(err);
     } finally {
       setGeneratingRefPrompts(false);
+    }
+  }
+
+  // Synchronous batch generator for keyframe (first/last frame) image prompts.
+  // Mirrors handleGenerateRefPrompts — single LLM call, returns immediately.
+  const [generatingKeyframeAssets, setGeneratingKeyframeAssets] = useState(false);
+
+  async function handleGenerateKeyframeAssets() {
+    if (!project) return;
+    if (!textGuard()) return;
+    setGeneratingKeyframeAssets(true);
+    try {
+      const resp = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate_keyframe_prompts",
+          payload: { versionId: selectedVersionId },
+          modelConfig: getModelConfig(),
+          episodeId: useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+      if (!resp.ok) throw new Error("Failed");
+      const data = await resp.json();
+      toast.success(`已生成 ${data.updatedCount}/${data.totalShots} 个镜头的首尾帧提示词`);
+      await fetchProject(project.id, currentEpisodeId || undefined);
+    } catch (err) {
+      toast.error("生成首尾帧提示词失败");
+      console.error(err);
+    } finally {
+      setGeneratingKeyframeAssets(false);
     }
   }
 
@@ -491,7 +509,7 @@ export default function EpisodeStoryboardPage() {
     setGeneratingVideos(true);
     setLastBatchAction("batch_reference_video");
 
-    const targets = project.shots.filter((s) => overwrite ? true : !s.referenceVideoUrl);
+    const targets = project.shots.filter((s) => overwrite ? true : !getReferenceVideoUrl(s));
     setBatchProgress({ total: targets.length, completed: 0, failed: [] });
 
     try {
@@ -599,22 +617,17 @@ export default function EpisodeStoryboardPage() {
     const shots = project.shots;
     const needsText = shots.some((s) => !s.prompt && !s.motionScript);
     const needsFrame = shots.some((s) =>
-      generationMode === "reference" ? !s.sceneRefFrame : !s.firstFrame || !s.lastFrame
+      generationMode === "reference" ? !getSceneRefFrameUrl(s) : !getFirstFrameUrl(s) || !getLastFrameUrl(s)
     );
     const needsPrompt = shots.some((s) => !s.videoPrompt);
     const needsVideo = shots.some((s) =>
-      generationMode === "reference" ? !s.referenceVideoUrl : !s.videoUrl
+      generationMode === "reference" ? !getReferenceVideoUrl(s) : !getKeyframeVideoUrl(s)
     );
 
     if (needsText) await handleGenerateShots();
     if (generationMode === "reference") {
       // Step 2a: Generate ref image prompts if needed
-      const needsRefPrompts = shots.some((s) => {
-        try {
-          const refs = JSON.parse(s.referenceImages || "[]");
-          return !Array.isArray(refs) || refs.length === 0;
-        } catch { return true; }
-      });
+      const needsRefPrompts = shots.some((s) => getReferenceAssets(s).length === 0);
       if (needsRefPrompts) await handleGenerateRefPrompts();
 
       // Step 2b: Generate ref images
@@ -834,7 +847,6 @@ export default function EpisodeStoryboardPage() {
               <>
                 <Button
                   size="sm"
-                  variant={shotsWithRefPrompts === 0 ? "default" : "outline"}
                   onClick={handleGenerateRefPrompts}
                   disabled={generatingRefPrompts || anyGenerating || totalShots === 0}
                 >
@@ -862,8 +874,21 @@ export default function EpisodeStoryboardPage() {
             ) : (
               <>
                 <Button
+                  size="sm"
+                  onClick={handleGenerateKeyframeAssets}
+                  disabled={generatingKeyframeAssets || anyGenerating || totalShots === 0}
+                  title="基于已有的镜头元数据生成首尾帧的图像提示词"
+                >
+                  {generatingKeyframeAssets ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {generatingKeyframeAssets ? "生成中…" : "生成首尾帧提示词"}
+                </Button>
+                <Button
                   onClick={() => handleBatchGenerateFrames(false)}
-                  disabled={anyGenerating || totalShots === 0}
+                  disabled={anyGenerating || totalShots === 0 || shotsWithKeyframePrompts === 0}
                   variant={shotsWithFrames === totalShots && totalShots > 0 ? "outline" : "default"}
                   size="sm"
                 >
@@ -878,7 +903,7 @@ export default function EpisodeStoryboardPage() {
                 </Button>
                 <Button
                   onClick={() => handleBatchGenerateFrames(true)}
-                  disabled={anyGenerating || totalShots === 0}
+                  disabled={anyGenerating || totalShots === 0 || shotsWithKeyframePrompts === 0}
                   variant="ghost"
                   size="icon"
                   title={t("project.batchGenerateFramesOverwrite")}
@@ -889,18 +914,6 @@ export default function EpisodeStoryboardPage() {
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
                 </Button>
-                {canContinueFromPrev && (
-                  <label className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={continueFromPrev}
-                      onChange={(e) => setContinueFromPrev(e.target.checked)}
-                      className="accent-primary h-3.5 w-3.5"
-                      disabled={anyGenerating}
-                    />
-                    {t("project.continueFromPrev")}
-                  </label>
-                )}
               </>
             )}
           </div>
@@ -935,7 +948,14 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(false)
                   : handleBatchGenerateVideos(false)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages || !allRefImagesGenerated : shotsWithFrames === 0)}
+              disabled={
+  anyGenerating ||
+  totalShots === 0 ||
+  shotsWithVideoPrompts !== totalShots ||
+  (generationMode === "reference"
+    ? !hasReferenceImages || !allRefImagesGenerated || shotsWithRefPrompts !== totalShots
+    : shotsWithFrames !== totalShots)
+}
               variant={shotsWithVideo === totalShots && totalShots > 0 ? "outline" : "default"}
               size="sm"
             >
@@ -956,7 +976,14 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(true)
                   : handleBatchGenerateVideos(true)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages || !allRefImagesGenerated : shotsWithFrames === 0)}
+              disabled={
+  anyGenerating ||
+  totalShots === 0 ||
+  shotsWithVideoPrompts !== totalShots ||
+  (generationMode === "reference"
+    ? !hasReferenceImages || !allRefImagesGenerated || shotsWithRefPrompts !== totalShots
+    : shotsWithFrames !== totalShots)
+}
               variant="ghost"
               size="icon"
               title={t("project.batchGenerateVideosOverwrite")}
@@ -1044,8 +1071,8 @@ export default function EpisodeStoryboardPage() {
             return project.shots.map((s) => ({
               id: s.id,
               sequence: s.sequence,
-              firstFrame: s.firstFrame,
-              lastFrame: s.lastFrame,
+              firstFrame: getFirstFrameUrl(s),
+              lastFrame: getLastFrameUrl(s),
               prompt: s.prompt,
               duration: s.duration,
             }));
@@ -1065,16 +1092,7 @@ export default function EpisodeStoryboardPage() {
         </div>
       ) : viewMode === "kanban" ? (
         <ShotKanban
-          shots={project.shots.map((shot) => ({
-            id: shot.id,
-            sequence: shot.sequence,
-            prompt: shot.prompt,
-            firstFrame: shot.firstFrame,
-            lastFrame: shot.lastFrame,
-            sceneRefFrame: shot.sceneRefFrame,
-            videoPrompt: shot.videoPrompt,
-            videoUrl: generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl,
-          }))}
+          shots={project.shots}
           generationMode={generationMode}
           anyGenerating={anyGenerating}
           onOpenDrawer={(id) => setOpenDrawerShotId(id)}
@@ -1093,39 +1111,8 @@ export default function EpisodeStoryboardPage() {
           const renderShotCard = (shot: typeof project.shots[number]) => (
             <ShotCard
               key={shot.id}
-              id={shot.id}
+              shot={shot}
               projectId={project.id}
-              sequence={shot.sequence}
-              prompt={shot.prompt}
-              startFrameDesc={shot.startFrameDesc}
-              endFrameDesc={shot.endFrameDesc}
-              videoScript={shot.videoScript}
-              motionScript={shot.motionScript}
-              cameraDirection={shot.cameraDirection}
-              duration={shot.duration}
-              firstFrame={shot.firstFrame}
-              lastFrame={shot.lastFrame}
-              sceneRefFrame={shot.sceneRefFrame}
-              referenceImages={shot.referenceImages}
-              videoPrompt={shot.videoPrompt}
-              transitionIn={shot.transitionIn}
-              transitionOut={shot.transitionOut}
-              compositionGuide={shot.compositionGuide}
-              focalPoint={shot.focalPoint}
-              depthOfField={shot.depthOfField}
-              soundDesign={shot.soundDesign}
-              musicCue={shot.musicCue}
-              videoUrl={generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl}
-              status={
-                generationMode === "reference"
-                  ? shot.status === "generating"
-                    ? "generating"
-                    : shot.referenceVideoUrl
-                      ? "completed"
-                      : "pending"
-                  : shot.status
-              }
-              dialogues={shot.dialogues || []}
               onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
               generationMode={generationMode}
               videoRatio={videoRatio}

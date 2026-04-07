@@ -164,6 +164,8 @@
     "addRefImage": "添加参考图",
     "refImagePrompt": "参考图提示词...",
     "noRefImages": "暂无参考图提示词",
+    "noKeyframes": "暂无首尾帧提示词",
+    "refChars": "镜头角色",
     "generateRefImages": "生成参考图",
     "refChars": "角色",
     "regenerateRefImages": "重新生成参考图",
@@ -325,7 +327,11 @@
       "refImagePromptsDesc": "根据分镜描述为每个镜头生成参考图提示词",
       "videoGenerate": "视频生成",
       "refVideoGenerate": "参考视频生成",
-      "refVideoPrompt": "视频提示词生成"
+      "refVideoPrompt": "视频提示词生成",
+      "shotSplitKeyframeAssets": "分镜·首尾帧提示词",
+      "shotSplitKeyframeAssetsDesc": "基于已有镜头元数据生成首帧/尾帧的图像提示词",
+      "shotSplitReferenceAssets": "分镜·参考图提示词",
+      "shotSplitReferenceAssetsDesc": "基于已有镜头元数据生成参考图的图像提示词"
     },
     "editor": {
       "slotMode": "插槽",
@@ -472,7 +478,15 @@
       "compositionRules": "构图规则",
       "compositionRulesDesc": "场景构图和画面布局要求",
       "rendering": "渲染质量",
-      "renderingDesc": "画面渲染和光线质量要求"
+      "renderingDesc": "画面渲染和光线质量要求",
+      "scriptFidelity": "剧本保真度",
+      "scriptFidelityDesc": "镜头列表必须 100% 覆盖剧本叙事内容的硬约束",
+      "originalFidelity": "原文保真度",
+      "originalFidelityDesc": "解析剧本时对白逐字保留、事件全量落地的硬约束",
+      "rules": "规则",
+      "rulesDesc": "本提示词的核心规则集",
+      "durationStrategy": "时长策略",
+      "durationStrategyDesc": "按镜头时长分级的描述颗粒度规则"
     }
   }
 }

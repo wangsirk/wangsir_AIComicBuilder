@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams } from "next/navigation";
-import { useProjectStore } from "@/stores/project-store";
+import {
+  useProjectStore,
+  getKeyframeVideoUrl,
+  getReferenceVideoUrl,
+  getSceneRefFrameUrl,
+  getFirstFrameUrl,
+} from "@/stores/project-store";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
@@ -41,8 +47,8 @@ export default function EpisodePreviewPage() {
   const generationMode = project?.generationMode ?? "keyframe";
 
   // Which mode's videos to preview — default to the project's generationMode
-  const hasKeyframeVideos = project?.shots.some((s) => s.videoUrl) ?? false;
-  const hasReferenceVideos = project?.shots.some((s) => s.referenceVideoUrl) ?? false;
+  const hasKeyframeVideos = project?.shots.some((s) => getKeyframeVideoUrl(s)) ?? false;
+  const hasReferenceVideos = project?.shots.some((s) => getReferenceVideoUrl(s)) ?? false;
   const hasBothModes = hasKeyframeVideos && hasReferenceVideos;
 
   const [previewMode, setPreviewMode] = useState<"keyframe" | "reference">(generationMode);
@@ -65,10 +71,10 @@ export default function EpisodePreviewPage() {
   if (!project) return null;
 
   const getVideoUrl = (shot: typeof project.shots[0]) =>
-    previewMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl;
+    previewMode === "reference" ? getReferenceVideoUrl(shot) : getKeyframeVideoUrl(shot);
 
   const getThumbnail = (shot: typeof project.shots[0]) =>
-    previewMode === "reference" ? shot.sceneRefFrame : shot.firstFrame;
+    previewMode === "reference" ? getSceneRefFrameUrl(shot) : getFirstFrameUrl(shot);
 
   const shotsWithVideo = project.shots.filter((s) => getVideoUrl(s));
   const allShotsHaveVideo = project.shots.length > 0 && project.shots.every((s) => getVideoUrl(s));

@@ -103,6 +103,8 @@ export async function handleShotSplit(task: Task) {
     sceneId?: string
   ) => {
     const shotId = genId();
+    // Metadata-only insert. Image/video assets live in the shot_assets table
+    // and are produced by independent downstream pipelines (keyframe / reference).
     const [record] = await db
       .insert(shots)
       .values({
@@ -110,8 +112,6 @@ export async function handleShotSplit(task: Task) {
         projectId: payload.projectId,
         sequence: (shotData.sequence as number) || 0,
         prompt: (shotData.prompt as string) || "",
-        startFrameDesc: (shotData.startFrame as string) || "",
-        endFrameDesc: (shotData.endFrame as string) || "",
         motionScript: (shotData.motionScript as string) || "",
         videoScript: (shotData.videoScript as string) || "",
         cameraDirection: (shotData.cameraDirection as string) || "static",
@@ -123,32 +123,6 @@ export async function handleShotSplit(task: Task) {
         depthOfField: (shotData.depthOfField as string) || "medium",
         soundDesign: (shotData.soundDesign as string) || "",
         musicCue: (shotData.musicCue as string) || "",
-        referenceImages: JSON.stringify([
-          // First frame & last frame items
-          {
-            id: genId(),
-            type: "first_frame",
-            prompt: (shotData.startFrame as string) || "",
-            status: "pending",
-            characters: Array.isArray(shotData.characters) ? shotData.characters : [],
-          },
-          {
-            id: genId(),
-            type: "last_frame",
-            prompt: (shotData.endFrame as string) || "",
-            status: "pending",
-            characters: Array.isArray(shotData.characters) ? shotData.characters : [],
-          },
-          // Reference image items
-          ...(Array.isArray(shotData.referenceImagePrompts) ? shotData.referenceImagePrompts : [])
-            .map((p: string) => ({
-              id: genId(),
-              type: "reference",
-              prompt: p,
-              status: "pending",
-              characters: Array.isArray(shotData.characters) ? shotData.characters : [],
-            })),
-        ]),
         episodeId: payload.episodeId ?? null,
         sceneId: sceneId ?? null,
       })

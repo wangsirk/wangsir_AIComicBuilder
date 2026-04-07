@@ -163,6 +163,8 @@
     "addRefImage": "참조 추가",
     "refImagePrompt": "참조 이미지 프롬프트...",
     "noRefImages": "참조 이미지 프롬프트가 없습니다",
+    "noKeyframes": "키프레임 프롬프트가 없습니다",
+    "refChars": "샷 내 캐릭터",
     "generateRefImages": "참조 이미지 생성",
     "regenerateRefImages": "참조 이미지 재생성",
     "maxRefImages": "최대 9개의 참조 이미지",
@@ -323,7 +325,11 @@
       "refImagePromptsDesc": "스토리보드에서 각 샷의 참고 이미지 프롬프트 생성",
       "videoGenerate": "영상 생성",
       "refVideoGenerate": "참조 영상 생성",
-      "refVideoPrompt": "영상 프롬프트 생성"
+      "refVideoPrompt": "영상 프롬프트 생성",
+      "shotSplitKeyframeAssets": "샷·키프레임 프롬프트",
+      "shotSplitKeyframeAssetsDesc": "기존 샷 메타데이터에서 첫/마지막 프레임 이미지 프롬프트 생성",
+      "shotSplitReferenceAssets": "샷·참고 이미지 프롬프트",
+      "shotSplitReferenceAssetsDesc": "기존 샷 메타데이터에서 참고 이미지 프롬프트 생성"
     },
     "editor": {
       "slotMode": "슬롯",
@@ -470,7 +476,15 @@
       "compositionRules": "구도 규칙",
       "compositionRulesDesc": "씬 구도 및 레이아웃 요구사항",
       "rendering": "렌더링 품질",
-      "renderingDesc": "렌더링 및 조명 품질 요구사항"
+      "renderingDesc": "렌더링 및 조명 품질 요구사항",
+      "scriptFidelity": "각본 충실도",
+      "scriptFidelityDesc": "샷 리스트가 각본의 서사 내용을 100% 다루도록 하는 강제 제약",
+      "originalFidelity": "원문 충실도",
+      "originalFidelityDesc": "대사를 한 글자도 빠짐없이 보존하고 모든 사건을 반영하는 강제 제약",
+      "rules": "규칙",
+      "rulesDesc": "본 프롬프트의 핵심 규칙",
+      "durationStrategy": "길이 전략",
+      "durationStrategyDesc": "샷 길이에 따른 묘사 세분화 규칙"
     }
   }
 }

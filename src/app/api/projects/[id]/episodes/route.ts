@@ -36,24 +36,24 @@ export async function GET(
     allEpisodes.map(async (ep) => {
       if (ep.finalVideoUrl) return { ...ep, previewImages: [] };
 
-      // 1) Collect frame images from shots, deduplicated
+      // 1) Collect frame images from shot_assets, deduplicated
       const epShots = await db
-        .select({
-          firstFrame: shots.firstFrame,
-          lastFrame: shots.lastFrame,
-          sceneRefFrame: shots.sceneRefFrame,
-        })
+        .select({ id: shots.id })
         .from(shots)
         .where(eq(shots.episodeId, ep.id));
+      const { loadShotLegacyViewsBatch } = await import("@/lib/shot-asset-utils");
+      const legacy = await loadShotLegacyViewsBatch(epShots.map((s) => s.id));
 
       const frameSet = new Set<string>();
       const isReference = ep.generationMode === "reference";
       for (const s of epShots) {
+        const view = legacy.get(s.id);
+        if (!view) continue;
         if (isReference) {
-          if (s.sceneRefFrame) frameSet.add(s.sceneRefFrame);
+          if (view.sceneRefFrame) frameSet.add(view.sceneRefFrame);
         } else {
-          if (s.firstFrame) frameSet.add(s.firstFrame);
-          if (s.lastFrame) frameSet.add(s.lastFrame);
+          if (view.firstFrame) frameSet.add(view.firstFrame);
+          if (view.lastFrame) frameSet.add(view.lastFrame);
         }
       }
 

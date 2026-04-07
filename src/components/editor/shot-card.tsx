@@ -6,7 +6,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore } from "@/stores/model-store";
-import { useProjectStore } from "@/stores/project-store";
+import {
+  useProjectStore,
+  type Shot,
+  getFirstFrameUrl,
+  getLastFrameUrl,
+  getSceneRefFrameUrl,
+  getKeyframeVideoUrl,
+  getReferenceVideoUrl,
+  getFirstFramePrompt,
+  getLastFramePrompt,
+  getReferenceAssets,
+  type ShotAsset,
+} from "@/stores/project-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { apiFetch } from "@/lib/api-fetch";
 import { toast } from "sonner";
@@ -33,42 +45,54 @@ import {
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { InlineModelPicker } from "./model-selector";
-import { parseRefImages, serializeRefImages, type RefImage } from "@/lib/ref-image-utils";
 import { id as genId } from "@/lib/id";
 
-interface Dialogue {
+// Local shape compatible with legacy rendering code, built from ShotAsset.
+interface RefImage {
   id: string;
-  text: string;
-  characterName: string;
+  type: "first_frame" | "last_frame" | "reference" | "video" | "ref_video";
+  prompt: string;
+  imagePath?: string;
+  status: "pending" | "generated";
+  characters?: string[];
+  model?: { providerId: string; modelId: string };
+  history?: string[];
+  /** Parallel array to history: shot_assets row IDs for each historical version */
+  historyIds?: string[];
+}
+
+function assetToRefImage(a: ShotAsset, allAssets: ShotAsset[] = []): RefImage {
+  const typeMap: Record<ShotAsset["type"], RefImage["type"]> = {
+    first_frame: "first_frame",
+    last_frame: "last_frame",
+    reference: "reference",
+    keyframe_video: "video",
+    reference_video: "ref_video",
+  };
+  // Build the version history from all sibling rows in the same slot,
+  // sorted oldest → newest by assetVersion. Each entry has fileUrl + asset id
+  // so the UI can call activate API by id.
+  const siblings = allAssets
+    .filter((x) => x.type === a.type && x.sequenceInType === a.sequenceInType)
+    .sort((x, y) => x.assetVersion - y.assetVersion);
+  const historyUrls = siblings.map((s) => s.fileUrl).filter((u): u is string => !!u);
+  const historyIds = siblings.filter((s) => !!s.fileUrl).map((s) => s.id);
+  return {
+    id: a.id,
+    type: typeMap[a.type],
+    prompt: a.prompt ?? "",
+    imagePath: a.fileUrl ?? undefined,
+    status: a.status === "completed" && a.fileUrl ? "generated" : "pending",
+    characters: a.characters ?? undefined,
+    model: a.modelProvider && a.modelId ? { providerId: a.modelProvider, modelId: a.modelId } : undefined,
+    history: historyUrls,
+    historyIds,
+  };
 }
 
 interface ShotCardProps {
-  id: string;
+  shot: Shot;
   projectId: string;
-  sequence: number;
-  prompt: string;
-  startFrameDesc: string | null;
-  endFrameDesc: string | null;
-  videoScript: string | null;
-  motionScript: string | null;
-  cameraDirection: string;
-  duration: number;
-  firstFrame: string | null;
-  lastFrame: string | null;
-  videoUrl: string | null;
-  sceneRefFrame?: string | null;
-  referenceImages?: string; // JSON array of image paths
-  videoPrompt?: string | null;
-  transitionIn?: string;
-  transitionOut?: string;
-  compositionGuide?: string;
-  focalPoint?: string;
-  depthOfField?: string;
-  soundDesign?: string;
-  musicCue?: string;
-  isStale?: boolean;
-  status: string;
-  dialogues: Dialogue[];
   onUpdate: () => void;
   generationMode?: "keyframe" | "reference";
   videoRatio?: string;
@@ -145,32 +169,8 @@ function StepRow({
 }
 
 export function ShotCard({
-  id,
+  shot,
   projectId,
-  sequence,
-  prompt,
-  startFrameDesc,
-  endFrameDesc,
-  videoScript,
-  motionScript,
-  cameraDirection,
-  duration,
-  firstFrame,
-  lastFrame,
-  videoUrl,
-  sceneRefFrame,
-  referenceImages,
-  videoPrompt,
-  transitionIn,
-  transitionOut,
-  compositionGuide,
-  focalPoint,
-  depthOfField,
-  soundDesign,
-  musicCue,
-  isStale,
-  status,
-  dialogues,
   onUpdate,
   generationMode = "keyframe",
   videoRatio = "16:9",
@@ -180,6 +180,34 @@ export function ShotCard({
   batchGeneratingVideoPrompts = false,
   batchGeneratingVideos = false,
 }: ShotCardProps) {
+  const id = shot.id;
+  const sequence = shot.sequence;
+  const prompt = shot.prompt;
+  const videoScript = shot.videoScript;
+  const motionScript = shot.motionScript;
+  const cameraDirection = shot.cameraDirection;
+  const duration = shot.duration;
+  const videoPrompt = shot.videoPrompt;
+  const transitionIn = shot.transitionIn;
+  const transitionOut = shot.transitionOut;
+  const compositionGuide = shot.compositionGuide;
+  const focalPoint = shot.focalPoint;
+  const depthOfField = shot.depthOfField;
+  const soundDesign = shot.soundDesign;
+  const musicCue = shot.musicCue;
+  const isStale = shot.isStale;
+  const dialogues = shot.dialogues ?? [];
+  const firstFrame = getFirstFrameUrl(shot);
+  const lastFrame = getLastFrameUrl(shot);
+  const sceneRefFrame = getSceneRefFrameUrl(shot);
+  const videoUrl = generationMode === "reference" ? getReferenceVideoUrl(shot) : getKeyframeVideoUrl(shot);
+  const startFrameDesc = getFirstFramePrompt(shot);
+  const endFrameDesc = getLastFramePrompt(shot);
+  const status = generationMode === "reference"
+    ? shot.status === "generating"
+      ? "generating"
+      : videoUrl ? "completed" : "pending"
+    : shot.status;
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
 
@@ -220,11 +248,17 @@ export function ShotCard({
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
 
-  // Parse all items from referenceImages JSON
-  const allRefItems = useMemo(() => parseRefImages(referenceImages), [referenceImages]);
-  // Reference mode: only type=reference items
+  // Build legacy-shape RefImage[] from the unified shot.assets[] (null-safe)
+  // Build legacy-shape RefImage[] from the unified shot.assets[] (null-safe).
+  // Only ACTIVE rows become entries; siblings (older versions) are folded
+  // into history / historyIds for the version arrows.
+  const allRefItems = useMemo(() => {
+    const all = Array.isArray(shot.assets) ? shot.assets : [];
+    return all
+      .filter((a) => a.isActive === 1)
+      .map((a) => assetToRefImage(a, all));
+  }, [shot.assets]);
   const parsedRefImages = useMemo(() => allRefItems.filter((r) => r.type === "reference"), [allRefItems]);
-  // Keyframe mode: first_frame and last_frame items
   const firstFrameItem = useMemo(() => allRefItems.find((r) => r.type === "first_frame"), [allRefItems]);
   const lastFrameItem = useMemo(() => allRefItems.find((r) => r.type === "last_frame"), [allRefItems]);
 
@@ -358,23 +392,120 @@ export function ShotCard({
     setRewritingText(false);
   }
 
+  // ─── shot_assets sync helpers (PUT /shots/:id/assets) ─────
+  // Convert legacy-shape RefImage[] back to ShotAsset patches and PUT them.
+  function refImageToAssetPatch(r: RefImage) {
+    const reverseTypeMap: Record<RefImage["type"], ShotAsset["type"] | null> = {
+      first_frame: "first_frame",
+      last_frame: "last_frame",
+      reference: "reference",
+      video: "keyframe_video",
+      ref_video: "reference_video",
+    };
+    const type = reverseTypeMap[r.type];
+    if (!type) return null;
+    return {
+      id: r.id,
+      type,
+      sequenceInType: 0, // default; reference items override below by index
+      prompt: r.prompt,
+      characters: r.characters ?? null,
+      fileUrl: r.imagePath ?? null,
+      status: r.status === "generated" ? "completed" : "pending",
+    };
+  }
+
+  async function syncAssetsToBackend(items: RefImage[]) {
+    // Group reference items so we can assign sequenceInType by array order
+    const patches = items
+      .map((r, idx) => {
+        const p = refImageToAssetPatch(r);
+        if (!p) return null;
+        // For reference type, use position in filtered ref list as sequenceInType
+        if (p.type === "reference") {
+          const refIdx = items.filter((x) => x.type === "reference").indexOf(r);
+          p.sequenceInType = refIdx >= 0 ? refIdx : idx;
+        }
+        return p;
+      })
+      .filter(Boolean);
+
+    try {
+      const resp = await apiFetch(`/api/projects/${projectId}/shots/${id}/assets`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: patches }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save assets");
+    }
+  }
+
   async function handleClearFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
-    await patchShot({ [field]: null });
-    onUpdate();
+    const targetType: ShotAsset["type"] =
+      field === "firstFrame" ? "first_frame" : field === "lastFrame" ? "last_frame" : "reference";
+    // Remove the matching item from allRefItems
+    const updated = allRefItems.filter(
+      (r) => !(r.type === targetType && (targetType !== "reference" || r.id === allRefItems.find((x) => x.type === "reference")?.id))
+    );
+    await syncAssetsToBackend(updated);
   }
 
-  // Save ref images array to shot
-  // Save ref images — merges updated reference items back with frame items
   async function saveRefImages(updatedRefItems: RefImage[]) {
-    const frameItems = allRefItems.filter((r) => r.type === "first_frame" || r.type === "last_frame");
-    await patchShot({ referenceImages: serializeRefImages([...frameItems, ...updatedRefItems]) });
-    onUpdate();
+    // Merge: keep first/last frame items as-is, replace reference items with the new list
+    const nonRef = allRefItems.filter((r) => r.type !== "reference");
+    const merged = [...nonRef, ...updatedRefItems.filter((r) => r.type === "reference")];
+    await syncAssetsToBackend(merged);
   }
 
-  // Save all items (including frame items) — for when frame items are modified
   async function saveAllItems(updated: RefImage[]) {
-    await patchShot({ referenceImages: serializeRefImages(updated) });
-    onUpdate();
+    await syncAssetsToBackend(updated);
+  }
+
+  /**
+   * Activate a specific historical version of an asset (by shot_assets row ID).
+   * The backend flips is_active flags and the next fetchProject pulls the new
+   * active row.
+   */
+  async function activateAssetById(assetId: string) {
+    try {
+      const resp = await apiFetch(
+        `/api/projects/${projectId}/shots/${id}/assets/${assetId}/activate`,
+        { method: "POST" }
+      );
+      if (!resp.ok) throw new Error(await resp.text());
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to switch version");
+    }
+  }
+
+  /**
+   * Save the prompt text for first_frame or last_frame.
+   * If the asset row doesn't exist yet, create it via the sync endpoint.
+   */
+  async function saveKeyframePrompt(slot: "first_frame" | "last_frame", prompt: string) {
+    const existing = allRefItems.find((r) => r.type === slot);
+    let updated: RefImage[];
+    if (existing) {
+      updated = allRefItems.map((r) =>
+        r.id === existing.id ? { ...r, prompt } : r
+      );
+    } else {
+      // Create a new pending entry for this slot
+      updated = [
+        ...allRefItems,
+        {
+          id: genId(),
+          type: slot,
+          prompt,
+          status: "pending" as const,
+        },
+      ];
+    }
+    await syncAssetsToBackend(updated);
   }
 
   // Add empty ref image card
@@ -389,6 +520,55 @@ export function ShotCard({
     saveRefImages(updated);
   }
 
+  // ─── Pending-save coordinator ────────────────────────────
+  // Each pending save is registered in a global ref. On unmount or
+  // visibility change (tab switch / refresh), all pending closures are
+  // flushed synchronously so no edit is lost.
+  const pendingSavesRef = useRef<Map<string, () => Promise<void>>>(new Map());
+  function registerPendingSave(key: string, runner: () => Promise<void>) {
+    pendingSavesRef.current.set(key, runner);
+  }
+  function clearPendingSave(key: string) {
+    pendingSavesRef.current.delete(key);
+  }
+  async function flushAllPendingSaves() {
+    const tasks = Array.from(pendingSavesRef.current.values());
+    pendingSavesRef.current.clear();
+    await Promise.allSettled(tasks.map((t) => t()));
+  }
+  useEffect(() => {
+    const handler = () => {
+      // Fire-and-forget; browser may not wait for promises but at least
+      // synchronous body of each runner gets a chance to fetch().
+      flushAllPendingSaves();
+    };
+    window.addEventListener("beforeunload", handler);
+    document.addEventListener("visibilitychange", handler);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+      document.removeEventListener("visibilitychange", handler);
+      // Component unmount → flush whatever is queued
+      flushAllPendingSaves();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced auto-save for keyframe (first/last frame) prompts
+  const keyframeSaveTimerRef = useRef<{ first?: ReturnType<typeof setTimeout>; last?: ReturnType<typeof setTimeout> }>({});
+  function scheduleKeyframeSave(slot: "first_frame" | "last_frame", prompt: string) {
+    const key = slot;
+    const timerKey = slot === "first_frame" ? "first" : "last";
+    if (keyframeSaveTimerRef.current[timerKey]) {
+      clearTimeout(keyframeSaveTimerRef.current[timerKey]);
+    }
+    const runner = async () => {
+      clearPendingSave(key);
+      await saveKeyframePrompt(slot, prompt);
+    };
+    registerPendingSave(key, runner);
+    keyframeSaveTimerRef.current[timerKey] = setTimeout(runner, 500);
+  }
+
   // Local state for ref image prompts (controlled inputs with debounced save)
   const [localRefPrompts, setLocalRefPrompts] = useState<Record<string, string>>({});
   const refPromptTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -399,27 +579,30 @@ export function ShotCard({
 
   function handleRefPromptChange(refId: string, value: string) {
     setLocalRefPrompts((prev) => ({ ...prev, [refId]: value }));
-    // Debounced save
+    // Debounced save, registered with the unmount-flush coordinator
     if (refPromptTimerRef.current[refId]) clearTimeout(refPromptTimerRef.current[refId]);
-    refPromptTimerRef.current[refId] = setTimeout(() => {
+    const key = `ref:${refId}`;
+    const runner = async () => {
+      clearPendingSave(key);
       const updated = parsedRefImages.map((r) => r.id === refId ? { ...r, prompt: value } : r);
-      saveRefImages(updated);
-    }, 800);
+      await saveRefImages(updated);
+    };
+    registerPendingSave(key, runner);
+    refPromptTimerRef.current[refId] = setTimeout(runner, 500);
   }
 
-  // Switch active version of a ref image (cycle through history)
-  function handleSwitchRefImageVersion(refId: string, direction: "prev" | "next") {
-    const updated = parsedRefImages.map((r) => {
-      if (r.id !== refId) return r;
-      const history = r.history || (r.imagePath ? [r.imagePath] : []);
-      if (history.length < 2) return r;
-      const currentIdx = r.imagePath ? history.indexOf(r.imagePath) : -1;
-      const nextIdx = direction === "next"
-        ? (currentIdx + 1) % history.length
-        : (currentIdx - 1 + history.length) % history.length;
-      return { ...r, imagePath: history[nextIdx] };
-    });
-    saveRefImages(updated);
+  // Switch active version of a ref image — calls the backend activate endpoint
+  // by id, then re-fetches. Ref id is the *currently active* asset row id.
+  async function handleSwitchRefImageVersion(refId: string, direction: "prev" | "next") {
+    const ref = parsedRefImages.find((r) => r.id === refId);
+    if (!ref || !ref.historyIds || ref.historyIds.length < 2) return;
+    const currentIdx = ref.historyIds.indexOf(refId);
+    if (currentIdx < 0) return;
+    const nextIdx = direction === "next"
+      ? (currentIdx + 1) % ref.historyIds.length
+      : (currentIdx - 1 + ref.historyIds.length) % ref.historyIds.length;
+    const targetId = ref.historyIds[nextIdx];
+    await activateAssetById(targetId);
   }
 
   // Update a ref image's prompt (immediate save, e.g. on blur)
@@ -830,7 +1013,7 @@ export function ShotCard({
                   {parsedRefImages.map((ref) => (
                     <div key={ref.id} className="rounded-lg border border-[--border-subtle] bg-white overflow-hidden">
                       {/* Image or placeholder */}
-                      <div className="relative aspect-video bg-[--surface]">
+                      <div className={`relative bg-[--surface] ${ref.imagePath ? "aspect-video" : "h-20"}`}>
                         {ref.imagePath ? (
                           <img
                             src={uploadUrl(ref.imagePath)}
@@ -839,11 +1022,7 @@ export function ShotCard({
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center">
-                            {ref.prompt ? (
-                              <span className="text-[10px] text-[--text-muted] px-2 text-center line-clamp-3">{ref.prompt.substring(0, 80)}...</span>
-                            ) : (
-                              <ImageIcon className="h-5 w-5 text-[--text-muted]" />
-                            )}
+                            <ImageIcon className="h-5 w-5 text-[--text-muted]" />
                           </div>
                         )}
                         {/* History navigation arrows */}
@@ -898,7 +1077,7 @@ export function ShotCard({
                           onChange={(e) => handleRefPromptChange(ref.id, e.target.value)}
                           onBlur={(e) => handleUpdateRefPrompt(ref.id, e.target.value)}
                           placeholder={t("shot.refImagePrompt")}
-                          rows={4}
+                          rows={8}
                           className="w-full resize-none border-0 bg-transparent px-2 py-1 text-[11px] leading-snug text-[--text-secondary] placeholder:text-[--text-muted] focus:outline-none"
                         />
                       </div>
@@ -983,7 +1162,20 @@ export function ShotCard({
               )}
             </div>
           ) : (
-            <div className="mb-2.5 grid grid-cols-2 gap-2">
+            <div className="mb-2.5 space-y-2">
+              {(() => {
+                // Empty state: show when there is no actual content for either frame.
+                // "Content" = prompt text OR generated image (file URL or local edit).
+                const hasFirstPrompt = !!firstFrameItem?.prompt || !!editStartFrame;
+                const hasLastPrompt = !!lastFrameItem?.prompt || !!editEndFrame;
+                const hasFrameImage = !!firstFrame || !!lastFrame;
+                return !hasFirstPrompt && !hasLastPrompt && !hasFrameImage;
+              })() ? (
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-[--border-subtle] p-4 text-xs text-[--text-muted]">
+                  {t("shot.noKeyframes") || "暂无首尾帧提示词"}
+                </div>
+              ) : (
+              <div className="grid grid-cols-2 gap-2">
               {frameAssets.map((asset, i) => {
                 const fieldName = (i === 0 ? "firstFrame" : "lastFrame") as "firstFrame" | "lastFrame";
                 const isUploading = uploadingField === fieldName;
@@ -995,31 +1187,31 @@ export function ShotCard({
                 const colorClass = isStart ? "border-blue-200 bg-blue-50/30" : "border-amber-200 bg-amber-50/30";
 
                 const frameItem = isStart ? firstFrameItem : lastFrameItem;
-                const frameHistory = frameItem?.history || (asset.src ? [asset.src] : []);
-                const frameCurrentIdx = asset.src ? frameHistory.indexOf(asset.src) : -1;
+                const frameHistoryIds = frameItem?.historyIds || [];
+                const frameHistory = frameItem?.history || [];
+                const frameCurrentIdx = frameItem ? frameHistoryIds.indexOf(frameItem.id) : -1;
                 return (
                   <div key={i} className="rounded-lg border border-[--border-subtle] bg-white overflow-hidden">
                     {/* Image */}
                     <div
-                      className={`relative bg-[--surface] ${asset.src && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                      className={`relative bg-[--surface] ${asset.src ? "aspect-video" : "h-20"} ${asset.src && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
                       onClick={() => asset.src && !isUploading && setPreviewSrc(uploadUrl(asset.src))}
                     >
                       {isUploading ? (
-                        <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
+                        <div className="flex h-full items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
                       ) : asset.src ? (
-                        <img src={uploadUrl(asset.src)} className="w-full object-contain" />
+                        <img src={uploadUrl(asset.src)} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="flex h-20 items-center justify-center"><ImageIcon className="h-5 w-5 text-[--text-muted]" /></div>
+                        <div className="flex h-full items-center justify-center"><ImageIcon className="h-5 w-5 text-[--text-muted]" /></div>
                       )}
                       {/* History arrows */}
-                      {frameHistory.length > 1 && (
+                      {frameHistoryIds.length > 1 && (
                         <>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const next = (frameCurrentIdx - 1 + frameHistory.length) % frameHistory.length;
-                              patchShot({ [fieldName]: frameHistory[next] });
-                              onUpdate();
+                              const next = (frameCurrentIdx - 1 + frameHistoryIds.length) % frameHistoryIds.length;
+                              activateAssetById(frameHistoryIds[next]);
                             }}
                             className="absolute left-1 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white hover:bg-black/70"
                           >
@@ -1028,16 +1220,15 @@ export function ShotCard({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const next = (frameCurrentIdx + 1) % frameHistory.length;
-                              patchShot({ [fieldName]: frameHistory[next] });
-                              onUpdate();
+                              const next = (frameCurrentIdx + 1) % frameHistoryIds.length;
+                              activateAssetById(frameHistoryIds[next]);
                             }}
                             className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white hover:bg-black/70"
                           >
                             <ChevronRight className="h-3 w-3" />
                           </button>
                           <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/50 px-1.5 py-0.5 text-[9px] text-white">
-                            {frameCurrentIdx + 1}/{frameHistory.length}
+                            {frameCurrentIdx + 1}/{frameHistoryIds.length}
                           </span>
                         </>
                       )}
@@ -1048,7 +1239,7 @@ export function ShotCard({
                         <p className={`text-[9px] font-semibold uppercase tracking-[0.1em] ${isStart ? "text-blue-500" : "text-amber-500"}`}>{label}</p>
                         <AiOptimizeButton
                           value={editValue}
-                          onOptimized={(v) => { setEditValue(v); patchShot({ [dbField]: v }); }}
+                          onOptimized={(v) => { setEditValue(v); saveKeyframePrompt(isStart ? "first_frame" : "last_frame", v); }}
                           fieldLabel={dbField}
                           projectId={projectId}
                           images={asset.src ? [asset.src] : undefined}
@@ -1056,10 +1247,14 @@ export function ShotCard({
                       </div>
                       <textarea
                         value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onBlur={() => patchShot({ [dbField]: editValue })}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditValue(v);
+                          scheduleKeyframeSave(isStart ? "first_frame" : "last_frame", v);
+                        }}
+                        onBlur={() => saveKeyframePrompt(isStart ? "first_frame" : "last_frame", editValue)}
                         placeholder={label}
-                        rows={3}
+                        rows={8}
                         className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[11px] leading-snug text-[--text-secondary] placeholder:text-[--text-muted] focus:outline-none`}
                       />
                     </div>
@@ -1121,6 +1316,8 @@ export function ShotCard({
                   </div>
                 );
               })}
+              </div>
+              )}
             </div>
           )}
           <Button
@@ -1189,8 +1386,8 @@ export function ShotCard({
           {hasVideo && (() => {
             const videoTypeKey = generationMode === "reference" ? "ref_video" : "video";
             const videoItem = allRefItems.find((r) => r.type === videoTypeKey);
-            const videoHistory = videoItem?.history || (videoUrl ? [videoUrl] : []);
-            const videoCurrentIdx = videoUrl ? videoHistory.indexOf(videoUrl) : -1;
+            const videoHistoryIds = videoItem?.historyIds || [];
+            const videoCurrentIdx = videoItem ? videoHistoryIds.indexOf(videoItem.id) : -1;
             return (
               <div
                 className="group relative mb-2.5 w-full overflow-hidden rounded-xl border border-[--border-subtle] bg-black cursor-pointer"
@@ -1204,15 +1401,13 @@ export function ShotCard({
                   </div>
                 </div>
                 {/* History navigation arrows */}
-                {videoHistory.length > 1 && (
+                {videoHistoryIds.length > 1 && (
                   <>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const next = (videoCurrentIdx - 1 + videoHistory.length) % videoHistory.length;
-                        const fieldName = generationMode === "reference" ? "referenceVideoUrl" : "videoUrl";
-                        patchShot({ [fieldName]: videoHistory[next] });
-                        onUpdate();
+                        const next = (videoCurrentIdx - 1 + videoHistoryIds.length) % videoHistoryIds.length;
+                        activateAssetById(videoHistoryIds[next]);
                       }}
                       className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70"
                     >
@@ -1221,17 +1416,15 @@ export function ShotCard({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const next = (videoCurrentIdx + 1) % videoHistory.length;
-                        const fieldName = generationMode === "reference" ? "referenceVideoUrl" : "videoUrl";
-                        patchShot({ [fieldName]: videoHistory[next] });
-                        onUpdate();
+                        const next = (videoCurrentIdx + 1) % videoHistoryIds.length;
+                        activateAssetById(videoHistoryIds[next]);
                       }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70"
                     >
                       <ChevronRight className="h-4 w-4" />
                     </button>
                     <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white">
-                      {videoCurrentIdx + 1}/{videoHistory.length}
+                      {videoCurrentIdx + 1}/{videoHistoryIds.length}
                     </span>
                   </>
                 )}

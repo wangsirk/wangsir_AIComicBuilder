@@ -274,82 +274,82 @@ export function ScriptEditor() {
         />
       </div>
 
-      {/* Outline section */}
-      <div className="rounded-2xl border border-[--border-subtle] bg-white p-1.5">
-        <div className="flex items-center justify-between px-5 pt-3 pb-1">
-          <div className="flex items-center gap-2">
-            <ListOrdered className="h-3.5 w-3.5 text-violet-500" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
-              {t("project.outline")}
-            </span>
+      {/* Outline + Generated script — side by side, fixed height */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Outline section */}
+        <div className="flex flex-col rounded-2xl border border-[--border-subtle] bg-white p-1.5">
+          <div className="flex items-center justify-between px-5 pt-3 pb-1">
+            <div className="flex items-center gap-2">
+              <ListOrdered className="h-3.5 w-3.5 text-violet-500" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                {t("project.outline")}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleGenerateOutline}
+              disabled={generatingOutline || generating || !project.idea?.trim()}
+            >
+              {generatingOutline ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {generatingOutline ? t("common.generating") : t("project.generateOutline")}
+            </Button>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleGenerateOutline}
-            disabled={generatingOutline || generating || !project.idea?.trim()}
-          >
-            {generatingOutline ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            {generatingOutline ? t("common.generating") : t("project.generateOutline")}
-          </Button>
-        </div>
 
-        <Textarea
-          value={outline}
-          onChange={(e) => handleOutlineChange(e.target.value)}
-          onBlur={handleSave}
-          placeholder={t("project.outlinePlaceholder")}
-          rows={2}
-          disabled={generatingOutline}
-          className={`max-h-[20vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
-            generatingOutline ? "opacity-40" : ""
-          }`}
-        />
-      </div>
-
-      {/* Generated script */}
-      <div className="rounded-2xl border border-[--border-subtle] bg-white p-1.5">
-        <div className="flex items-center justify-between px-5 pt-3 pb-1">
-          <div className="flex items-center gap-2">
-            <FileText className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
-              {t("project.generatedScript")}
-            </span>
-          </div>
-          <Button
-            size="sm"
-            onClick={handleGenerateScript}
-            disabled={generating || generatingOutline || !project.idea?.trim()}
-          >
-            {generating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            {generating ? t("common.generating") : t("project.generateScript")}
-          </Button>
-        </div>
-        {project.script ? (
           <Textarea
-            ref={scriptTextareaRef}
-            value={project.script}
-            onChange={(e) => { updateScript(e.target.value); if (!generating) scheduleSave(); }}
-            onBlur={() => { if (!generating) handleSave(); }}
-            rows={16}
-            disabled={generating}
-            className={`h-[55vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
-              generating ? "opacity-40" : ""
+            value={outline}
+            onChange={(e) => handleOutlineChange(e.target.value)}
+            onBlur={handleSave}
+            placeholder={t("project.outlinePlaceholder")}
+            disabled={generatingOutline}
+            className={`h-[55vh] max-h-[55vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
+              generatingOutline ? "opacity-40" : ""
             }`}
           />
-        ) : (
-          <div className="px-5 pb-4 pt-2 text-sm text-[--text-muted]">
-            {t("project.scriptPlaceholder") || "点击上方按钮生成剧本..."}
+        </div>
+
+        {/* Generated script */}
+        <div className="flex flex-col rounded-2xl border border-[--border-subtle] bg-white p-1.5">
+          <div className="flex items-center justify-between px-5 pt-3 pb-1">
+            <div className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                {t("project.generatedScript")}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleGenerateScript}
+              disabled={generating || generatingOutline || !project.idea?.trim()}
+            >
+              {generating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {generating ? t("common.generating") : t("project.generateScript")}
+            </Button>
           </div>
-        )}
+          {project.script ? (
+            <Textarea
+              ref={scriptTextareaRef}
+              value={project.script}
+              onChange={(e) => { updateScript(e.target.value); if (!generating) scheduleSave(); }}
+              onBlur={() => { if (!generating) handleSave(); }}
+              disabled={generating}
+              className={`h-[55vh] max-h-[55vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
+                generating ? "opacity-40" : ""
+              }`}
+            />
+          ) : (
+            <div className="h-[55vh] max-h-[55vh] overflow-y-auto px-5 pb-4 pt-2 text-sm text-[--text-muted]">
+              {t("project.scriptPlaceholder") || "点击上方按钮生成剧本..."}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
