@@ -20,7 +20,6 @@ const DEFAULT_BASE_URLS: Record<Protocol, string> = {
   "ucloud-seedance": "https://api.modelverse.cn",
   kling: "https://api.klingai.com",
   wan: "https://dashscope.aliyuncs.com/api/v1",
-  dashscope: "https://dashscope.aliyuncs.com/api/v1",
 };
 
 function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {
@@ -35,7 +34,6 @@ function getProtocolOptions(capability: Capability): { value: Protocol; label: s
       { value: "openai", label: "OpenAI" },
       { value: "gemini", label: "Gemini" },
       { value: "kling", label: "Kling" },
-      { value: "dashscope", label: "百炼 (图片)" },
     ];
   }
   // video
@@ -44,7 +42,7 @@ function getProtocolOptions(capability: Capability): { value: Protocol; label: s
     { value: "ucloud-seedance", label: "Seedance (UCloud)" },
     { value: "gemini", label: "Gemini (Veo)" },
     { value: "kling", label: "Kling" },
-    { value: "wan", label: "百炼 (视频)" },
+    { value: "wan", label: "Wan (通义万相)" },
   ];
 }
 
@@ -234,6 +232,29 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Vision support toggle for text providers using OpenAI protocol */}
+      {provider.capability === "text" && provider.protocol === "openai" && (
+        <div className="flex items-center justify-between rounded-lg border border-[--border-subtle] px-3 py-2.5">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("supportsVision")}</Label>
+            <p className="text-xs text-[--text-muted]">{t("supportsVisionHint")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => updateProvider(provider.id, { supportsVision: !provider.supportsVision })}
+            className={`relative h-5 w-9 rounded-full transition-colors ${
+              provider.supportsVision !== false ? "bg-primary" : "bg-[--border-subtle]"
+            }`}
+          >
+            <span
+              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                provider.supportsVision !== false ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
         </div>
       )}
 

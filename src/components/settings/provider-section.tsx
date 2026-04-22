@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelStore, type Capability, type Protocol } from "@/stores/model-store";
 import { ProviderCard } from "@/components/settings/provider-card";
@@ -24,8 +24,21 @@ export function ProviderSection({
   defaultBaseUrl,
 }: ProviderSectionProps) {
   const t = useTranslations("settings");
+  const [hydrated, setHydrated] = useState(false);
   const { providers, addProvider, removeProvider } = useModelStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Wait for Zustand persist to hydrate from localStorage
+  useEffect(() => {
+    if (useModelStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsubscribe = useModelStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    return unsubscribe;
+  }, []);
 
   const sectionProviders = providers.filter((p) => p.capability === capability);
   const selectedProvider = sectionProviders.find((p) => p.id === selectedId) || null;
@@ -47,6 +60,24 @@ export function ProviderSection({
       const remaining = sectionProviders.filter((p) => p.id !== id);
       setSelectedId(remaining.length > 0 ? remaining[0].id : null);
     }
+  }
+
+  // Return placeholder during SSR/hydration to prevent mismatch
+  if (!hydrated) {
+    return (
+      <div className="rounded-2xl border border-[--border-subtle] bg-white p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+            {icon}
+            {label}
+          </h3>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-10">
+          <div className="h-6 w-6 animate-pulse rounded bg-[--surface]" />
+          <div className="mt-2 h-4 w-24 animate-pulse rounded bg-[--surface]" />
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
 import { useTranslations } from "next-intl";
@@ -70,6 +71,7 @@ function PickerRow({
 
 export function DefaultModelPicker() {
   const t = useTranslations("settings");
+  const [hydrated, setHydrated] = useState(false);
   const {
     providers,
     defaultTextModel,
@@ -79,6 +81,20 @@ export function DefaultModelPicker() {
     setDefaultImageModel,
     setDefaultVideoModel,
   } = useModelStore();
+
+  // Wait for Zustand persist to hydrate from localStorage
+  useEffect(() => {
+    // Check if already hydrated
+    if (useModelStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    // Subscribe to hydration finish
+    const unsubscribe = useModelStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    return unsubscribe;
+  }, []);
 
   function getOptions(capability: string) {
     const result: {
@@ -100,6 +116,23 @@ export function DefaultModelPicker() {
       }
     }
     return result;
+  }
+
+  // Return empty placeholder during SSR/hydration to prevent mismatch
+  if (!hydrated) {
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/50 px-3 py-2.5">
+            <div className="h-8 w-8 rounded-lg bg-[--surface]" />
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="h-3 w-16 rounded bg-[--surface]" />
+              <div className="h-4 w-full rounded bg-[--surface]" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (

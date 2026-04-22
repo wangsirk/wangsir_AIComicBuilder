@@ -8,14 +8,17 @@ export class OpenAIProvider implements AIProvider {
   private client: OpenAI;
   private defaultModel: string;
   private uploadDir: string;
+  /** Whether this provider supports vision (image_url content type). DeepSeek and other non-vision models should set this to false. */
+  private supportsVision: boolean;
 
-  constructor(params?: { apiKey?: string; baseURL?: string; model?: string; uploadDir?: string; }) {
+  constructor(params?: { apiKey?: string; baseURL?: string; model?: string; uploadDir?: string; supportsVision?: boolean; }) {
     this.client = new OpenAI({
       apiKey: params?.apiKey || process.env.OPENAI_API_KEY,
       baseURL: params?.baseURL || process.env.OPENAI_BASE_URL,
     });
     this.defaultModel = params?.model || process.env.OPENAI_MODEL || "gpt-4o";
     this.uploadDir = params?.uploadDir || process.env.UPLOAD_DIR || "./uploads";
+    this.supportsVision = params?.supportsVision ?? true;
   }
 
   async generateText(prompt: string, options?: TextOptions): Promise<string> {
@@ -24,7 +27,8 @@ export class OpenAIProvider implements AIProvider {
       messages.push({ role: "system", content: options.systemPrompt });
     }
 
-    if (options?.images?.length) {
+    // Only use vision (image_url) if the provider supports it
+    if (this.supportsVision && options?.images?.length) {
       const content: OpenAI.Chat.ChatCompletionContentPart[] = [];
       for (const imgPath of options.images) {
         try {

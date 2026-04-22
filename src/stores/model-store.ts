@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { id as genId } from "@/lib/id";
 
-export type Protocol = "openai" | "gemini" | "seedance" | "ucloud-seedance" | "kling" | "wan" | "dashscope";
+export type Protocol = "openai" | "gemini" | "seedance" | "ucloud-seedance" | "kling" | "wan";
 export type Capability = "text" | "image" | "video";
 
 export interface Model {
@@ -20,6 +20,8 @@ export interface Provider {
   apiKey: string;
   secretKey?: string;
   models: Model[];
+  /** Whether this provider supports vision (image input) for text models. Defaults to true. */
+  supportsVision?: boolean;
 }
 
 export interface ModelRef {
@@ -153,6 +155,7 @@ export const useModelStore = create<ModelStore>()(
             apiKey: provider.apiKey,
             secretKey: provider.secretKey,
             modelId: ref.modelId,
+            supportsVision: provider.supportsVision,
           };
         }
         return {

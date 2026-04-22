@@ -6,7 +6,6 @@ import { KlingImageProvider } from "./providers/kling-image";
 import { KlingVideoProvider } from "./providers/kling-video";
 import { WanVideoProvider } from "./providers/wan-video";
 import { UCloudSeedanceProvider } from "./providers/ucloud-seedance";
-import { DashScopeImageProvider } from "./providers/dashscope-image";
 import { getAIProvider, getVideoProvider } from "./index";
 import type { AIProvider, VideoProvider } from "./types";
 
@@ -16,6 +15,8 @@ interface ProviderConfig {
   apiKey: string;
   secretKey?: string;
   modelId: string;
+  /** Whether the model supports vision (image input). Defaults to true for OpenAI protocol. */
+  supportsVision?: boolean;
 }
 
 export interface ModelConfigPayload {
@@ -31,6 +32,7 @@ export function createAIProvider(config: ProviderConfig, uploadDir?: string): AI
         apiKey: config.apiKey,
         baseURL: config.baseUrl,
         model: config.modelId,
+        supportsVision: config.supportsVision,
         ...(uploadDir && { uploadDir }),
       });
     case "gemini":
@@ -44,13 +46,6 @@ export function createAIProvider(config: ProviderConfig, uploadDir?: string): AI
       return new KlingImageProvider({
         apiKey: config.apiKey,
         secretKey: config.secretKey,
-        baseUrl: config.baseUrl,
-        model: config.modelId,
-        ...(uploadDir && { uploadDir }),
-      });
-    case "dashscope":
-      return new DashScopeImageProvider({
-        apiKey: config.apiKey,
         baseUrl: config.baseUrl,
         model: config.modelId,
         ...(uploadDir && { uploadDir }),
